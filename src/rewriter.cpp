@@ -59,10 +59,19 @@ private:
 
   //Get the spelling string for Stmt *s.
   std::string get_str(Stmt *s){
-    std::string str1 = SM->getCharacterData(s->getLocStart());
-    std::string str2 = SM->getCharacterData(s->getLocEnd());
-    unsigned len = str1.size() - str2.size() + 1;
-    return str1.substr(0, len);
+    std::string ret;
+
+    if (isa<DeclRefExpr>(s)) {
+      DeclRefExpr *ref = cast<DeclRefExpr>(s);
+      ret = ref->getDecl()->getName().str();
+    }
+    else {
+      std::string str1 = SM->getCharacterData(s->getLocStart());
+      std::string str2 = SM->getCharacterData(s->getLocEnd());
+      unsigned len = str1.size() - str2.size() + 1;
+      ret = str1.substr(0, len);
+    }
+    return ret;
   }
   //return which level scope define this var, 0 means in kernel, 1 means out of kernel.
   unsigned query_var (std::string name, struct var_data ** var) {
@@ -316,7 +325,7 @@ public:
 	      if (isa<DeclRefExpr>(callee)) {
 	    	DeclRefExpr *ref = cast<DeclRefExpr>(callee);
 		if (ref->getDecl()->getName().str() == "malloc") {
-	          std::string str = get_str(call_e->getArg(0));
+	          std::string str = get_str(call_e->getArg(0)->IgnoreImpCasts());
 	          cur_var->size_str = "(";
 	          cur_var->size_str += str;
 	          cur_var->size_str += ")";

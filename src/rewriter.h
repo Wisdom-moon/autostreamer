@@ -38,6 +38,8 @@ struct var_data {
   //2: write only in kernel; 3:r+w in kernel;
   unsigned int usedByKernel;
   bool isKernelArg;
+  //For memory access in kernel, its Index expr chain.
+  std::vector<Expr> IdxChains;
 };
 
 struct Kernel_Info {
@@ -50,6 +52,8 @@ struct Kernel_Info {
   std::vector<var_decl> val_parms;
   std::vector<var_decl> pointer_parms;
   std::string length_var;
+
+  VarDecl * loop_index;
 };
 
 struct Scope_data {

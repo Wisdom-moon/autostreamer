@@ -4,7 +4,7 @@ It is based on LLVM 5.0.1
 It is implemented on clang libTooling.
 
 Function:
-It can transform the OpenCL programs into hStreams programs.
+It can transform the OpenMP programs into hStreams programs.
 
 Usage:
 ./test hello.c -- -fopenmp -I/home/moon/local/lib/clang/5.0.1/include/

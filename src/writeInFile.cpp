@@ -231,19 +231,6 @@ void WriteInFile::generateHostFile() {
     LineNo++;
     continue;
   }
-  if (exit_loop == LineNo) {
-    std::string Start;
-    for (std::string::iterator It = Line.begin(), E = Line.end(); It != E;
-	++ It) {
-      if (*It == ' ' || *It == '\t') {
-	Start += *It;
-      }
-      else
-	break;
-    }
-    LineNo++;
-    continue;
-  }
   if (finish_cite == LineNo) {
     std::string Start;
     for (std::string::iterator It = Line.begin(), E = Line.end(); It != E;
@@ -257,6 +244,10 @@ void WriteInFile::generateHostFile() {
 
     File<<Start<<"hStreams_ThreadSynchronize();\n"
 	<<Start<<"hStreams_app_fini();\n";
+  }
+  if (exit_loop == LineNo) {
+    LineNo++;
+    continue;
   }
 
   File << Line <<"\n";
@@ -366,6 +357,10 @@ void WriteInFile::set_length_var(std::string name) {
 
 void WriteInFile::add_mem_xfer(struct mem_xfer m) {
   mem_bufs.push_back (m);
+  int idx = m.type_name.find_last_of("*");
+  if (idx > 0) {
+    m.type_name.erase(idx, 1);
+  }
 
   if (m.type & 1) 
     pre_xfers.push_back (m);

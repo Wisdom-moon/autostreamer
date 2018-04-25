@@ -1,4 +1,4 @@
-EXEC = test
+EXEC = omp2hs
 
 CFLAGS = -fopenmp -Wall -g3 -ggdb -O0 -std=c++11 -I/home/moon/local/include
 LDFLAGS =
@@ -40,13 +40,10 @@ RM = rm -f
 
 all: $(EXEC)
 
-$(EXEC): test.cpp writeInFile.cpp
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
-
 OBJS = rewriter.o writeInFile.o
 
-omp2hs: ${OBJS}
-	${CC} ${OBJS} ${CLANGLIBS} ${LDCONFIG}  -o ../bin/omp2hs
+$(EXEC): ${OBJS}
+	${CC} ${OBJS} ${CLANGLIBS} ${LDCONFIG}  -o ../bin/$(EXEC)
 
 rewriter.o: rewriter.cpp
 	${CC} ${CFLAGS} ${LCCONFIG} -c rewriter.cpp
@@ -55,4 +52,4 @@ writeInFile.o: writeInFile.cpp
 	$(CC) $(CFLAGS) -c -o $@ $^ $(LDFLAGS)
 
 clean:
-	rm ../bin/omp2hs *.o $(EXEC)
+	rm ../bin/$(EXEC) *.o 
