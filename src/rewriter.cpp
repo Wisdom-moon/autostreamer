@@ -16,15 +16,20 @@ private:
   //write name only occurs when op is "=", and lvalue is the write memory.
   //All other mem access is read.
   //return 0: is a assignment opt. 1: others.
-  int check_mem_access (BinaryOperator *op, std::string &lhs, std::string &rhs) {
+  int check_mem_access (BinaryOperator *op, std::string &lhs, Expr **lhs_idx,
+			 std::string &rhs, Expr **rhs_idx) {
     int ret = 1;
     if (op->isAssignmentOp()) {
       ret = 0;
     }
+
+    *lhs_idx = NULL;
+    *rhs_idx = NULL;
  
     if (isa<ArraySubscriptExpr>(op->getRHS()->IgnoreImpCasts())) {
       ArraySubscriptExpr * arr = cast<ArraySubscriptExpr>(op->getRHS()->IgnoreImpCasts());
       Expr *base = arr->getBase()->IgnoreImpCasts();
+      *rhs_idx = arr->getIdx()->IgnoreImpCasts();
       if (isa<DeclRefExpr>(base)) {
         DeclRefExpr *ref = cast<DeclRefExpr>(base);
         rhs = ref->getDecl()->getName().str();
@@ -41,6 +46,7 @@ private:
     if (isa<ArraySubscriptExpr>(op->getLHS()->IgnoreImpCasts())) {
       ArraySubscriptExpr * arr = cast<ArraySubscriptExpr>(op->getLHS()->IgnoreImpCasts());
       Expr *base = arr->getBase()->IgnoreImpCasts();
+      *lhs_idx = arr->getIdx()->IgnoreImpCasts();
       if (isa<DeclRefExpr>(base)) {
         DeclRefExpr *ref = cast<DeclRefExpr>(base);
         lhs = ref->getDecl()->getName().str();
@@ -216,17 +222,27 @@ public:
 	      new_mem.buf_name = cur_var.name;
 	      new_mem.size_string = cur_var.size_str;
 	      new_mem.type_name = cur_var.type_str;
+	      new_mem.type = 0;
+	      for (auto &idx : cur_var.IdxChains) {
+	    	if (idx && isa<DeclRefExpr>(idx)) {
+		  DeclRefExpr *ref = cast<DeclRefExpr>(idx);
+		  if (ref->getDecl() != k_info.loop_index)
+		    new_mem.type = 1;
+		}
+	        else
+		  new_mem.type = 1;
+	      }
 	      switch (cur_var.usedByKernel) {
 		case 1:
-	  	  new_mem.type = 3;
+	  	  new_mem.type += 2;
 	   	  k_info.mem_bufs.push_back(new_mem);
 		  break;
 		case 2:
-	  	  new_mem.type = 5;
+	  	  new_mem.type += 4;
 	   	  k_info.mem_bufs.push_back(new_mem);
 		  break;
 		case 3:
-	  	  new_mem.type = 7;
+	  	  new_mem.type += 6;
 	   	  k_info.mem_bufs.push_back(new_mem);
 		  break;
 		default:
@@ -260,6 +276,7 @@ public:
 	Stmt *init = for_stmt->getInit();
 	if (isa<DeclStmt>(init)) {
 	  VarDecl *var = cast<VarDecl>(cast<DeclStmt>(init)->getSingleDecl());
+	  k_info.loop_index = var;
 	  Expr * init_val = var->getInit();
 	  new_rep.start_num = SM->getSpellingColumnNumber(init_val->getLocStart()) - 1;
 	  new_rep.size = 1;
@@ -310,7 +327,9 @@ public:
     if (isa<BinaryOperator>(s)) {
       BinaryOperator *op = cast<BinaryOperator>(s);
       std::string lhs, rhs;
-      int kind = check_mem_access (op, lhs, rhs);//0: assign.
+      Expr *lhs_idx;
+      Expr *rhs_idx;
+      int kind = check_mem_access (op, lhs, &lhs_idx, rhs, &rhs_idx);//0: assign.
 
       //Acorrding malloc function, set the size_str for var_data.
       if (kind == 0 && !lhs.empty()) {
@@ -350,6 +369,7 @@ public:
 	//lhs is the write to memory.
 	if (kind == 0 && !lhs.empty()) {
           unsigned in_kernel = query_var (lhs, &cur_var);//1 means out of kernel.
+	  cur_var->IdxChains.push_back(lhs_idx);
           if (cur_var && in_kernel == 1) {
 	    if (cur_var->usedByKernel < 2)
 	      cur_var->usedByKernel += 2;
@@ -359,6 +379,7 @@ public:
 	else {
 	  if (!lhs.empty()) {
             unsigned in_kernel = query_var (lhs, &cur_var);//1 means out of kernel.
+	    cur_var->IdxChains.push_back(lhs_idx);
             if (cur_var && in_kernel == 1) {
 	      if (cur_var->usedByKernel == 0 || cur_var->usedByKernel == 2)
 	        cur_var->usedByKernel ++;
@@ -366,6 +387,7 @@ public:
 	  }
 	  if (!rhs.empty()) {
             unsigned in_kernel = query_var (rhs, &cur_var);//1 means out of kernel.
+	    cur_var->IdxChains.push_back(rhs_idx);
             if (cur_var && in_kernel == 1) {
 	      if (cur_var->usedByKernel == 0 || cur_var->usedByKernel == 2)
 	        cur_var->usedByKernel ++;

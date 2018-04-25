@@ -364,8 +364,7 @@ void WriteInFile::add_mem_xfer(struct mem_xfer m) {
 
   if (m.type & 1) 
     pre_xfers.push_back (m);
-
-  if (m.type & 2) 
+  else if (m.type & 2) 
     h2d_xfers.push_back (m);
 
   if (m.type & 4) 

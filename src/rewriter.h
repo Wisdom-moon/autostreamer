@@ -39,7 +39,7 @@ struct var_data {
   unsigned int usedByKernel;
   bool isKernelArg;
   //For memory access in kernel, its Index expr chain.
-  std::vector<Expr> IdxChains;
+  std::vector<Expr *> IdxChains;
 };
 
 struct Kernel_Info {
@@ -53,6 +53,7 @@ struct Kernel_Info {
   std::vector<var_decl> pointer_parms;
   std::string length_var;
 
+//The omp parallel for iteration index variable declaration
   VarDecl * loop_index;
 };
 
