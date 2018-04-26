@@ -121,10 +121,25 @@ private:
     return new_var;
   }
 
+  void clean_kernel_info () {
+    k_info.enter_loop = 0;
+    k_info.exit_loop = 0;
+    k_info.init_cite = 0;
+    k_info.finish_cite = 0;
+    k_info.mem_bufs.clear();
+    k_info.replace_vars.clear();
+    k_info.val_parms.clear();
+    k_info.pointer_parms.clear();
+    k_info.length_var.clear();
+    k_info.loop_index = NULL;
+    k_info.insns = 0;
+  }
+
 
 public:
-  MyASTVisitor(struct Kernel_Info &k, std::vector<struct Scope_data> &s_stack): k_info(k), Scope_stack(s_stack)  {
+  MyASTVisitor(std::vector<struct Kernel_Info> &k, std::vector<struct Scope_data> &s_stack): k_info_queue(k), Scope_stack(s_stack)  {
     process_state = 0;
+    clean_kernel_info ();
   }
   void Initialize(ASTContext &Context) {
     Ctx = &Context;
@@ -248,9 +263,14 @@ public:
 		default:
 		  break;
 	      }
+	    cur_var.usedByKernel = 0;
+	    cur_var.isKernelArg = false;
+	    cur_var.IdxChains.clear();
 	    }
 	  }
+          k_info_queue.push_back(k_info);
 
+          clean_kernel_info ();
     	  process_state = 2;
 	}
       }
@@ -330,6 +350,13 @@ public:
       Expr *lhs_idx;
       Expr *rhs_idx;
       int kind = check_mem_access (op, lhs, &lhs_idx, rhs, &rhs_idx);//0: assign.
+
+      //Calculate algebra operation instructions in kernel.
+      if (process_state == 1) {
+	if (op->isMultiplicativeOp() || op->isAdditiveOp() || op->isShiftOp()) {
+	  k_info.insns ++;
+	}
+      }
 
       //Acorrding malloc function, set the size_str for var_data.
       if (kind == 0 && !lhs.empty()) {
@@ -419,7 +446,8 @@ public:
 private:
   ASTContext *Ctx;
   SourceManager *SM;
-  struct Kernel_Info &k_info;
+  struct Kernel_Info k_info;
+  std::vector<struct Kernel_Info> &k_info_queue;
   std::vector<struct Scope_data> &Scope_stack;
   //0: before kernel; 1: in kernel; 2: after kernel.
   unsigned process_state;
@@ -429,7 +457,7 @@ private:
 // by the Clang parser.
 class MyASTConsumer : public ASTConsumer {
 public:
-  MyASTConsumer(struct Kernel_Info &k_info, std::vector<struct Scope_data> &s_stack) : Visitor(k_info, s_stack), Scope_stack(s_stack) {}
+  MyASTConsumer(std::vector<struct Kernel_Info> &k_info_queue, std::vector<struct Scope_data> &s_stack) : Visitor(k_info_queue, s_stack), Scope_stack(s_stack) {}
 
   // Override the method that gets called for each parsed top-level
   // declaration.
@@ -456,15 +484,53 @@ private:
 
 // For each source file provided to the tool, a new FrontendAction is created.
 class MyFrontendAction : public ASTFrontendAction {
+private:
+  struct Kernel_Info * select_kernel () {
+    struct Kernel_Info * ret = NULL;
+    unsigned int max_insns = 0;
+    unsigned int max_overlap_mems = 0;
+    unsigned int max_mems = 0;
+    for (auto &k_info : k_info_queue) {
+      unsigned int overlap_mems = 0;
+      unsigned int mems = 0;
+      for (auto &mem_buf : k_info.mem_bufs) {
+	//Pre transfer mem 
+	if (mem_buf.type & 1) {
+	  if (mem_buf.type & 2)
+	    mems++;
+	  if (mem_buf.type & 4)
+	    mems++;
+	}
+        else {
+	  if (mem_buf.type & 2) 
+	    overlap_mems++;
+	  if (mem_buf.type & 4)
+	    overlap_mems++;
+	}
+      }
+      mems += overlap_mems;
+
+      if (k_info.insns > max_insns && overlap_mems > 0) {
+	max_insns = k_info.insns;
+	ret = &k_info;
+      }
+    }
+    return ret;
+  }
 public:
   MyFrontendAction() {}
 
 //Callback at the end of processing a single input.
   void EndSourceFileAction() override {
-    generator.set_enter_loop(k_info.enter_loop);
-    generator.set_exit_loop(k_info.exit_loop);
-    generator.set_init_cite(k_info.init_cite);
-    generator.set_finish_cite (k_info.finish_cite);
+
+    struct Kernel_Info * k_info = select_kernel ();
+    if (k_info == NULL)
+      return;
+
+    generator.set_enter_loop(k_info->enter_loop);
+    generator.set_exit_loop(k_info->exit_loop);
+    generator.set_init_cite(k_info->init_cite);
+    generator.set_finish_cite (k_info->finish_cite);
 
     struct var_decl var;
     var.type_name = "int";
@@ -475,22 +541,22 @@ public:
     var.var_name = "end_index";
     generator.add_kernel_arg(var);
 
-    generator.set_length_var(k_info.length_var);
-    for (unsigned i = 0; i < k_info.val_parms.size(); i++)
+    generator.set_length_var(k_info->length_var);
+    for (unsigned i = 0; i < k_info->val_parms.size(); i++)
     {
-      generator.add_kernel_arg(k_info.val_parms[i]);
+      generator.add_kernel_arg(k_info->val_parms[i]);
     }
-    for (unsigned i = 0; i < k_info.pointer_parms.size(); i++)
+    for (unsigned i = 0; i < k_info->pointer_parms.size(); i++)
     {
-      generator.add_kernel_arg(k_info.pointer_parms[i]);
+      generator.add_kernel_arg(k_info->pointer_parms[i]);
     }
-    for (unsigned i = 0; i < k_info.replace_vars.size(); i++)
+    for (unsigned i = 0; i < k_info->replace_vars.size(); i++)
     {
-      generator.add_replace_info(k_info.replace_vars[i]);
+      generator.add_replace_info(k_info->replace_vars[i]);
     }
-    for (unsigned i = 0; i < k_info.mem_bufs.size(); i++)
+    for (unsigned i = 0; i < k_info->mem_bufs.size(); i++)
     {
-      generator.add_mem_xfer(k_info.mem_bufs[i]);
+      generator.add_mem_xfer(k_info->mem_bufs[i]);
     }
 
     generator.set_logical_streams (2);
@@ -513,12 +579,12 @@ public:
     new_scope.p_func = NULL;
     Scope_stack.push_back (new_scope);
 
-    return llvm::make_unique<MyASTConsumer>(k_info, Scope_stack);
+    return llvm::make_unique<MyASTConsumer>(k_info_queue, Scope_stack);
   }
 
 private:
   WriteInFile generator;
-  struct Kernel_Info k_info;
+  std::vector<struct Kernel_Info> k_info_queue;
   std::vector<struct Scope_data> Scope_stack;
 };
 

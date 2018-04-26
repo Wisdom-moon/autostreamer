@@ -53,8 +53,10 @@ struct Kernel_Info {
   std::vector<var_decl> pointer_parms;
   std::string length_var;
 
-//The omp parallel for iteration index variable declaration
+  //The omp parallel for iteration index variable declaration
   VarDecl * loop_index;
+  //The compute instructions.
+  unsigned int insns;
 };
 
 struct Scope_data {
