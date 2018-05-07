@@ -14,6 +14,93 @@ static llvm::cl::OptionCategory ToolingSampleCategory("Tooling Sample");
 // we're interested in by overriding relevant methods.
 class MyASTVisitor : public RecursiveASTVisitor<MyASTVisitor> {
 private:
+
+  void analysis_bin_op (BinaryOperator *op, std::string &min, std::string &max) {
+
+    Expr *lhs = op->getLHS()->IgnoreImpCasts();
+    if (isa<BinaryOperator> (lhs))
+      analysis_bin_op (cast<BinaryOperator>(lhs), min, max);
+    else if (isa<DeclRefExpr> (lhs)){
+      DeclRefExpr *ref = cast<DeclRefExpr>(lhs);
+      struct var_data *cur_var;
+      query_var (ref->getDecl()->getName().str(), &cur_var);
+      if (cur_var && cur_var->type == 1) {
+        if (!cur_var->min_value.empty())
+	  min += cur_var->min_value;
+	else
+	  min += cur_var->name;
+	if (!cur_var->max_value.empty())
+	  max += cur_var->max_value;
+	else
+	  max += cur_var->name;
+      }
+    }
+    else {
+      min += get_str(lhs);
+      max += get_str(lhs);
+    }
+
+    std::string op_str = op->getOpcodeStr().str();
+    min += op_str;
+    max += op_str;
+
+    Expr *rhs = op->getRHS()->IgnoreImpCasts();
+    if (isa<BinaryOperator> (rhs))
+      analysis_bin_op (cast<BinaryOperator>(rhs), min, max);
+    else if (isa<DeclRefExpr> (rhs)){
+      DeclRefExpr *ref = cast<DeclRefExpr>(rhs);
+      struct var_data *cur_var;
+      query_var (ref->getDecl()->getName().str(), &cur_var);
+      if (cur_var && cur_var->type == 1) {
+        if (!cur_var->min_value.empty())
+	  min += cur_var->min_value;
+	else
+	  min += cur_var->name;
+	if (!cur_var->max_value.empty())
+	  max += cur_var->max_value;
+	else
+	  max += cur_var->name;
+      }
+    }
+    else {
+      min += get_str(rhs);
+      max += get_str(rhs);
+    }
+  }
+
+  void analysis_index (Expr *idx, std::string &min, std::string &max) {
+    if (idx == NULL)
+      return ;
+
+    min.clear();
+    max.clear();
+
+    if (isa<BinaryOperator>(idx)) {
+      analysis_bin_op (cast<BinaryOperator>(idx), min, max);
+    }
+    else if (isa<DeclRefExpr> (idx)){
+      DeclRefExpr *ref = cast<DeclRefExpr>(idx);
+      struct var_data *cur_var;
+      query_var (ref->getDecl()->getName().str(), &cur_var);
+      if (cur_var && cur_var->type == 1) {
+        if (!cur_var->min_value.empty())
+	  min += cur_var->min_value;
+	else
+	  min += cur_var->name;
+	if (!cur_var->max_value.empty())
+	  max += cur_var->max_value;
+	else
+	  max += cur_var->name;
+      }
+    }
+    else {
+      min += get_str(idx);
+      max += get_str(idx);
+    }
+
+    return ;
+  }
+
   //Check memory read/write, return var name.
   //write name only occurs when op is "=", and lvalue is the write memory.
   //All other mem access is read.
@@ -308,6 +395,35 @@ public:
       #ifdef DEBUG_INFO
       s->dump();
       #endif
+      //Record iterator var's value range
+      ForStmt *for_stmt = cast<ForStmt>(s);
+      Stmt *init = for_stmt->getInit();
+      if (isa<DeclStmt>(init)) {
+	  VarDecl *var = cast<VarDecl>(cast<DeclStmt>(init)->getSingleDecl());
+	  Expr * init_val = var->getInit();
+          struct var_data * init_var = Insert_var_data(var, Scope_stack.back());
+	  init_var->min_value = get_str(init_val);
+      }
+      else if (isa<BinaryOperator>(init)) {
+        BinaryOperator * op = cast<BinaryOperator>(init);
+	Expr *lhs = op->getLHS()->IgnoreImpCasts();
+	if (isa<DeclRefExpr>(lhs)) {
+	  struct var_data *init_var;
+	  DeclRefExpr *ref = cast<DeclRefExpr>(lhs);
+	  query_var (ref->getDecl()->getName().str(), &init_var);
+	  init_var->min_value = get_str(op->getRHS()->IgnoreImpCasts());
+	}
+      }
+
+      BinaryOperator *cond = cast<BinaryOperator>(for_stmt->getCond());
+      Expr *lhs = cond->getLHS()->IgnoreImpCasts();
+      if (isa<DeclRefExpr>(lhs)) {
+	struct var_data *init_var;
+	DeclRefExpr *ref = cast<DeclRefExpr>(lhs);
+	query_var (ref->getDecl()->getName().str(), &init_var);
+	if (cond->getOpcode() == BO_LT)
+	  init_var->max_value = get_str(cond->getRHS()->IgnoreImpCasts());
+      }
 
       unsigned i = Scope_stack.size();
       if (Scope_stack[i-2].type == 14) {
@@ -315,8 +431,6 @@ public:
         k_info.finish_cite = k_info.exit_loop;
 
 	struct replace_info new_rep;
-        ForStmt *for_stmt = cast<ForStmt>(s);
-	Stmt *init = for_stmt->getInit();
 	if (isa<DeclStmt>(init)) {
 	  VarDecl *var = cast<VarDecl>(cast<DeclStmt>(init)->getSingleDecl());
 	  Expr * init_val = var->getInit();
@@ -439,6 +553,7 @@ public:
 	if (kind == 0 && !lhs.empty()) {
           unsigned in_kernel = query_var (lhs, &cur_var);//1 means out of kernel.
 	  cur_var->IdxChains.push_back(lhs_idx);
+	  analysis_index (lhs_idx, cur_var->min_value, cur_var->max_value);
           if (cur_var && in_kernel == 1) {
 	    if (cur_var->usedByKernel < 2)
 	      cur_var->usedByKernel += 2;
@@ -449,7 +564,8 @@ public:
 	  if (!lhs.empty()) {
             unsigned in_kernel = query_var (lhs, &cur_var);//1 means out of kernel.
 	    cur_var->IdxChains.push_back(lhs_idx);
-            if (cur_var && in_kernel == 1) {
+	    analysis_index (lhs_idx, cur_var->min_value, cur_var->max_value);
+            if (in_kernel == 1) {
 	      if (cur_var->usedByKernel == 0 || cur_var->usedByKernel == 2)
 	        cur_var->usedByKernel ++;
 	    }
@@ -457,6 +573,7 @@ public:
 	  if (!rhs.empty()) {
             unsigned in_kernel = query_var (rhs, &cur_var);//1 means out of kernel.
 	    cur_var->IdxChains.push_back(rhs_idx);
+	    analysis_index (rhs_idx, cur_var->min_value, cur_var->max_value);
             if (cur_var && in_kernel == 1) {
 	      if (cur_var->usedByKernel == 0 || cur_var->usedByKernel == 2)
 	        cur_var->usedByKernel ++;
@@ -566,7 +683,7 @@ private:
       }
       mems += overlap_mems;
 
-      if (k_info.insns > max_insns && overlap_mems > 0) {
+      if (k_info.insns > max_insns) {
 	max_insns = k_info.insns;
 	ret = &k_info;
       }
