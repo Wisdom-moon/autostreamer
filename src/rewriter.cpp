@@ -265,9 +265,11 @@ public:
 	if (cur_scope.p_func) {
 	  new_scope.type = 1;
 	  //Add ParmVarDecl to new_scope.var_table
-	  for (unsigned i = 0; i < cur_scope.p_func->getNumParams(); i++) {
-	    Insert_var_data(cur_scope.p_func->getParamDecl(i), new_scope);
-	  }
+	  if (SM->isWrittenInMainFile (cur_scope.p_func->getLocation())) {
+	    for (unsigned i = 0; i < cur_scope.p_func->getNumParams(); i++) {
+	      Insert_var_data(cur_scope.p_func->getParamDecl(i), new_scope);
+	    }
+ 	  }
 	}
 	else
 	  new_scope.type = 11;
@@ -331,6 +333,11 @@ public:
 	    for (auto &val_pair : scope.var_table) {
 	      struct var_data cur_var = val_pair.second;
 	      new_mem.buf_name = cur_var.name;
+	      new_mem.type_name = cur_var.type_str;
+	      int idx = new_mem.type_name.find_last_of("*");
+	      if (idx > 0)
+    	        new_mem.type_name.erase(idx, 1);
+
 	      if (!cur_var.size_str.empty())
 	        new_mem.size_string = cur_var.size_str;
 	      else if (!cur_var.min_value.empty() && !cur_var.max_value.empty())
@@ -338,10 +345,13 @@ public:
 	    	new_mem.size_string = "(";
 		new_mem.size_string += cur_var.max_value;
 		new_mem.size_string += "-";
+		new_mem.size_string += "(";
 		new_mem.size_string += cur_var.min_value;
+		new_mem.size_string += ") + 1)";
+		new_mem.size_string += "* sizeof (";
+		new_mem.size_string += new_mem.type_name;
 		new_mem.size_string += ")";
 	      }
-	      new_mem.type_name = cur_var.type_str;
 	      bool is_overlap = true;
 	      for (auto &idx : cur_var.IdxChains) {
 	    	if (idx && isa<DeclRefExpr>(idx)) {
@@ -421,8 +431,11 @@ public:
 	struct var_data *init_var;
 	DeclRefExpr *ref = cast<DeclRefExpr>(lhs);
 	query_var (ref->getDecl()->getName().str(), &init_var);
-	if (cond->getOpcode() == BO_LT)
-	  init_var->max_value = get_str(cond->getRHS()->IgnoreImpCasts());
+	if (cond->getOpcode() == BO_LT) {
+	  init_var->max_value = "((";
+	  init_var->max_value += get_str(cond->getRHS()->IgnoreImpCasts());
+	  init_var->max_value += ")-1)";
+	}
       }
 
       unsigned i = Scope_stack.size();
@@ -602,6 +615,8 @@ public:
 
             unsigned in_kernel = query_var (ref->getDecl()->getName().str(), &cur_var);//1 means out of kernel.
 	    cur_var->IdxChains.push_back(arr->getIdx()->IgnoreImpCasts());
+	    analysis_index (arr->getIdx()->IgnoreImpCasts(),
+			    cur_var->min_value, cur_var->max_value);
             if (cur_var && in_kernel == 1) {
 	      if (cur_var->usedByKernel == 0 || cur_var->usedByKernel == 2)
 	        cur_var->usedByKernel ++;

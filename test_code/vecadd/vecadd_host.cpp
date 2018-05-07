@@ -51,9 +51,9 @@ if( iret != 0 )
   exit(-1);
 }
 
-CHECK_HSTR_RESULT(hStreams_app_create_buf(hostInput1, (inputLengthBytes)));
-CHECK_HSTR_RESULT(hStreams_app_create_buf(hostInput2, (inputLengthBytes)));
-CHECK_HSTR_RESULT(hStreams_app_create_buf(hostOutput, (inputLengthBytes)));
+(hStreams_app_create_buf((float *)hostInput1, (inputLengthBytes)));
+(hStreams_app_create_buf((float *)hostInput2, (inputLengthBytes)));
+(hStreams_app_create_buf((float *)hostOutput, (inputLengthBytes)));
 int sub_blocks = inputLength/ 4;
 int remain_index = inputLength% 4;
 int start_index = 0;
@@ -72,16 +72,16 @@ for (int i = 0; i < 4; i++)
   if (i < remain_index)
     end_index ++;
   args[1] = (uint64_t) end_index;
-  CHECK_HSTR_RESULT(hStreams_app_xfer_memory(&hostInput1[start_index], &hostInput1[start_index], (end_index - start_index) * sizeof (float ), i % 2, HSTR_SRC_TO_SINK, NULL));
-  CHECK_HSTR_RESULT(hStreams_app_xfer_memory(&hostInput2[start_index], &hostInput2[start_index], (end_index - start_index) * sizeof (float ), i % 2, HSTR_SRC_TO_SINK, NULL));
-  CHECK_HSTR_RESULT(hStreams_EnqueueCompute(
+  (hStreams_app_xfer_memory(&hostInput1[start_index], &hostInput1[start_index], (end_index - start_index) * sizeof (float ), i % 2, HSTR_SRC_TO_SINK, NULL));
+  (hStreams_app_xfer_memory(&hostInput2[start_index], &hostInput2[start_index], (end_index - start_index) * sizeof (float ), i % 2, HSTR_SRC_TO_SINK, NULL));
+  (hStreams_EnqueueCompute(
 			i % 2,
 			"kernel",
 			3,
 			3,
 			args,
 			NULL,NULL,0));
-  CHECK_HSTR_RESULT(hStreams_app_xfer_memory(&hostOutput[start_index], &hostOutput[start_index], (end_index - start_index) * sizeof (float ), i % 2, HSTR_SINK_TO_SRC, NULL));
+  (hStreams_app_xfer_memory(&hostOutput[start_index], &hostOutput[start_index], (end_index - start_index) * sizeof (float ), i % 2, HSTR_SINK_TO_SRC, NULL));
   start_index = end_index;
 }
   hStreams_ThreadSynchronize();

@@ -153,14 +153,18 @@ void WriteInFile::generateHostFile() {
 
     //Add hStreams buf create code
     for (unsigned i = 0; i < mem_bufs.size(); i++) {
-      File <<Start<<"CHECK_HSTR_RESULT(hStreams_app_create_buf("
-	   <<mem_bufs[i].buf_name<<", "<<mem_bufs[i].size_string<<"));\n";
+      File <<Start<<"(hStreams_app_create_buf("
+	   <<"("<<mem_bufs[i].type_name<<"*)"
+	<<mem_bufs[i].buf_name<<", "<<mem_bufs[i].size_string<<"));\n";
     }
 
     //Add hStreams mem transfer code
     for (unsigned i = 0;i < pre_xfers.size(); i++) {
-      File <<Start<<"CHECK_HSTR_RESULT(hStreams_app_xfer_memory("
-	   <<pre_xfers[i].buf_name<<", "<<pre_xfers[i].buf_name<<" ,"
+      File <<Start<<"(hStreams_app_xfer_memory("
+	   <<"("<<mem_bufs[i].type_name<<"*)"
+	   <<pre_xfers[i].buf_name<<", "
+	   <<"("<<mem_bufs[i].type_name<<"*)"
+	   <<pre_xfers[i].buf_name<<" ,"
 	   <<pre_xfers[i].size_string<<", 0, HSTR_SRC_TO_SINK, NULL));\n";
     }
 
@@ -200,13 +204,13 @@ void WriteInFile::generateHostFile() {
 	 <<Start<<"    end_index ++;\n"
 	 <<Start<<"  args[1] = (uint64_t) end_index;\n";
     for (unsigned i = 0;i < h2d_xfers.size(); i++) {
-      File <<Start<<"  CHECK_HSTR_RESULT(hStreams_app_xfer_memory(&"
+      File <<Start<<"  (hStreams_app_xfer_memory(&"
 	   <<h2d_xfers[i].buf_name<<"[start_index], &"<<h2d_xfers[i].buf_name<<"[start_index], "
 	   <<"(end_index - start_index) * sizeof ("<<h2d_xfers[i].type_name<<"), "
 	   <<"i \% "<<logical_streams<<", HSTR_SRC_TO_SINK, NULL));\n";
     }
 
-    File <<Start<<"  CHECK_HSTR_RESULT(hStreams_EnqueueCompute(\n"
+    File <<Start<<"  (hStreams_EnqueueCompute(\n"
 	 <<Start<<"			i % "<<logical_streams<<",\n"
 	 <<Start<<"			\""<<KernelName<<"\",\n"
 	 <<Start<<"			"<<val_num<<",\n"
@@ -215,7 +219,7 @@ void WriteInFile::generateHostFile() {
 	 <<Start<<"			NULL,NULL,0));\n";
 
     for (unsigned i = 0;i < d2h_xfers.size(); i++) {
-      File <<Start<<"  CHECK_HSTR_RESULT(hStreams_app_xfer_memory(&"
+      File <<Start<<"  (hStreams_app_xfer_memory(&"
 	   <<d2h_xfers[i].buf_name<<"[start_index], &"<<d2h_xfers[i].buf_name<<"[start_index], "
 	   <<"(end_index - start_index) * sizeof ("<<d2h_xfers[i].type_name<<"), "
 	   <<"i \% "<<logical_streams<<", HSTR_SINK_TO_SRC, NULL));\n";
@@ -243,15 +247,13 @@ void WriteInFile::generateHostFile() {
     }
 
     File<<Start<<"hStreams_ThreadSynchronize();\n";
-    for (unsigned i = 0;i < pre_xfers.size(); i++) {
-      File <<Start<<"CHECK_HSTR_RESULT(hStreams_app_xfer_memory("
-	   <<pre_xfers[i].buf_name<<", "<<pre_xfers[i].buf_name<<" ,"
-	   <<pre_xfers[i].size_string<<", 0, HSTR_SRC_TO_SINK, NULL));\n";
-    }
     for (auto &mem_xfer : post_xfers) {
-      File <<Start<<"  CHECK_HSTR_RESULT(hStreams_app_xfer_memory("
-	   <<mem_xfer.buf_name<<", "<<mem_xfer.buf_name<<" ,"
-	   <<mem_xfer.size_string<<", 0, , HSTR_SINK_TO_SRC, NULL));\n";
+      File <<Start<<"  (hStreams_app_xfer_memory("
+	   <<"("<<mem_xfer.type_name<<"*)"
+	   <<mem_xfer.buf_name<<", "
+	   <<"("<<mem_xfer.type_name<<"*)"
+	   <<mem_xfer.buf_name<<" ,"
+	   <<mem_xfer.size_string<<", 0, HSTR_SINK_TO_SRC, NULL));\n";
     }
     File<<Start<<"hStreams_app_fini();\n";
   }
@@ -366,11 +368,11 @@ void WriteInFile::set_length_var(std::string name) {
 }
 
 void WriteInFile::add_mem_xfer(struct mem_xfer m) {
+  int idx = m.type_name.find("const");
+  if (idx >= 0)
+    m.type_name.erase(idx, 5);
+
   mem_bufs.push_back (m);
-  int idx = m.type_name.find_last_of("*");
-  if (idx > 0) {
-    m.type_name.erase(idx, 1);
-  }
 
   if (m.type & 1) 
     pre_xfers.push_back (m);
