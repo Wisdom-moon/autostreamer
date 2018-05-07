@@ -34,6 +34,11 @@ struct var_data {
   std::string size_str;
   //0: pointer, 1: value;
   unsigned int type;
+  //For pointer, min_value is index's min value
+  //For non-pointer, min_value is variable's min value
+  std::string min_value;
+  //max_value is assemble to min_value;
+  std::string max_value;
   //0: not used in kernel; 1: read only in kernel; 
   //2: write only in kernel; 3:r+w in kernel;
   unsigned int usedByKernel;
@@ -54,7 +59,7 @@ struct Kernel_Info {
   std::string length_var;
 
   //The omp parallel for iteration index variable declaration
-  VarDecl * loop_index;
+  ValueDecl * loop_index;
   //The compute instructions.
   unsigned int insns;
 };

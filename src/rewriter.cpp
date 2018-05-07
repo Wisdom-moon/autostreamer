@@ -6,6 +6,8 @@
 //------------------------------------------------------------------------------
 #include "rewriter.h"
 
+#define DEBUG_INFO
+
 static llvm::cl::OptionCategory ToolingSampleCategory("Tooling Sample");
 
 // By implementing RecursiveASTVisitor, we can specify which AST nodes
@@ -102,22 +104,30 @@ private:
     return ret;
   }
 
-  struct var_data CreateVar (VarDecl *d) {
-    struct var_data new_var;
-    new_var.name = d->getName().str();
-    new_var.type_str = d->getType().getAsString();
-    int f_index;
-    if ((f_index = new_var.type_str.find("*")) >= 0)
-      new_var.type = 0;
-    else {
-      new_var.type = 1;
-      new_var.size_str = "sizeof(";
-      new_var.size_str += new_var.type_str;
-      new_var.size_str += ")";
+  struct var_data * Insert_var_data (VarDecl *d, 
+				struct Scope_data &cur_scope) {
+    struct var_data * new_var;
+    if (cur_scope.var_table.find(d->getName().str()) == cur_scope.var_table.end()) {
+      struct var_data new_var;
+      new_var.name = d->getName().str();
+      new_var.type_str = d->getType().getAsString();
+      int f_index;
+      if ((f_index = new_var.type_str.find("*")) >= 0)
+        new_var.type = 0;
+      else {
+        new_var.type = 1;
+        new_var.size_str = "sizeof(";
+        new_var.size_str += new_var.type_str;
+        new_var.size_str += ")";
+      }
+
+      new_var.usedByKernel = 0;
+      new_var.isKernelArg = false;
+      cur_scope.var_table.insert({new_var.name, new_var});
     }
 
-    new_var.usedByKernel = 0;
-    new_var.isKernelArg = false;
+    new_var = &((*(cur_scope.var_table.find(d->getName().str()))).second);
+
     return new_var;
   }
 
@@ -169,8 +179,7 @@ public:
 	  new_scope.type = 1;
 	  //Add ParmVarDecl to new_scope.var_table
 	  for (unsigned i = 0; i < cur_scope.p_func->getNumParams(); i++) {
-            struct var_data new_var = CreateVar (cur_scope.p_func->getParamDecl(i));
-            new_scope.var_table.insert({new_var.name, new_var});
+	    Insert_var_data(cur_scope.p_func->getParamDecl(i), new_scope);
 	  }
 	}
 	else
@@ -235,29 +244,38 @@ public:
 	    for (auto &val_pair : scope.var_table) {
 	      struct var_data cur_var = val_pair.second;
 	      new_mem.buf_name = cur_var.name;
-	      new_mem.size_string = cur_var.size_str;
+	      if (!cur_var.size_str.empty())
+	        new_mem.size_string = cur_var.size_str;
+	      else if (!cur_var.min_value.empty() && !cur_var.max_value.empty())
+	      {
+	    	new_mem.size_string = "(";
+		new_mem.size_string += cur_var.max_value;
+		new_mem.size_string += "-";
+		new_mem.size_string += cur_var.min_value;
+		new_mem.size_string += ")";
+	      }
 	      new_mem.type_name = cur_var.type_str;
-	      new_mem.type = 0;
+	      bool is_overlap = true;
 	      for (auto &idx : cur_var.IdxChains) {
 	    	if (idx && isa<DeclRefExpr>(idx)) {
 		  DeclRefExpr *ref = cast<DeclRefExpr>(idx);
 		  if (ref->getDecl() != k_info.loop_index)
-		    new_mem.type = 1;
+		    is_overlap = false;
 		}
 	        else
-		  new_mem.type = 1;
+		  is_overlap = false;
 	      }
 	      switch (cur_var.usedByKernel) {
 		case 1:
-	  	  new_mem.type += 2;
+	  	  new_mem.type = is_overlap ? 2 : 1;
 	   	  k_info.mem_bufs.push_back(new_mem);
 		  break;
 		case 2:
-	  	  new_mem.type += 4;
+	  	  new_mem.type = is_overlap ? 4 : 8;
 	   	  k_info.mem_bufs.push_back(new_mem);
 		  break;
 		case 3:
-	  	  new_mem.type += 6;
+	  	  new_mem.type = is_overlap ? 6 : 9;
 	   	  k_info.mem_bufs.push_back(new_mem);
 		  break;
 		default:
@@ -286,6 +304,11 @@ public:
 
     //Location the outside for stmt in kernel, abstract iteration times
     if (isa<ForStmt>(s) && process_state == 1) {
+      //Dump the target for loop, for debug.
+      #ifdef DEBUG_INFO
+      s->dump();
+      #endif
+
       unsigned i = Scope_stack.size();
       if (Scope_stack[i-2].type == 14) {
         k_info.exit_loop = SM->getSpellingLineNumber(s->getLocEnd());
@@ -296,7 +319,6 @@ public:
 	Stmt *init = for_stmt->getInit();
 	if (isa<DeclStmt>(init)) {
 	  VarDecl *var = cast<VarDecl>(cast<DeclStmt>(init)->getSingleDecl());
-	  k_info.loop_index = var;
 	  Expr * init_val = var->getInit();
 	  new_rep.start_num = SM->getSpellingColumnNumber(init_val->getLocStart()) - 1;
 	  new_rep.size = 1;
@@ -304,9 +326,22 @@ public:
 	  new_rep.line_no = SM->getSpellingLineNumber(init_val->getLocStart());
 	  k_info.replace_vars.push_back(new_rep);
 	}
+	else if (isa<BinaryOperator>(init)) {
+	  BinaryOperator * op = cast<BinaryOperator>(init);
+	  new_rep.start_num = SM->getSpellingColumnNumber(op->getRHS()->getLocStart()) - 1;
+	  new_rep.size = 1;
+	  new_rep.name = "start_index";
+	  new_rep.line_no = SM->getSpellingLineNumber(op->getRHS()->getLocStart());
+	  k_info.replace_vars.push_back(new_rep);
+	}
 
 	BinaryOperator *cond = cast<BinaryOperator>(for_stmt->getCond());
 	Expr *rhs = cond->getRHS()->IgnoreImpCasts();
+	Expr *lhs = cond->getLHS()->IgnoreImpCasts();
+	if (isa<DeclRefExpr>(lhs)) {
+	  DeclRefExpr *ref = cast<DeclRefExpr>(lhs);
+	  k_info.loop_index = ref->getDecl();
+	}
 	if (isa<DeclRefExpr>(rhs)) {
 	  DeclRefExpr *ref = cast<DeclRefExpr>(rhs);
           k_info.length_var = ref->getDecl()->getName().str();
@@ -350,6 +385,13 @@ public:
       Expr *lhs_idx;
       Expr *rhs_idx;
       int kind = check_mem_access (op, lhs, &lhs_idx, rhs, &rhs_idx);//0: assign.
+
+/*
+      #ifdef DEBUG_INFO
+      if (kind == 0 && process_state != 1)
+        s->dump();
+      #endif
+*/
 
       //Calculate algebra operation instructions in kernel.
       if (process_state == 1) {
@@ -429,9 +471,29 @@ public:
 
   bool VisitVarDecl(VarDecl *d) {
     if (d->getKind() == Decl::Var) {
-      struct Scope_data &cur_scope = Scope_stack.back();
-      struct var_data new_var = CreateVar (d);
-      cur_scope.var_table.insert({new_var.name, new_var});
+      Insert_var_data(d, Scope_stack.back());
+
+      //It may also access memory in  declariton expression.
+      if (d->hasInit() && process_state == 1) {
+        Expr *init_v = d->getInit()->IgnoreImpCasts();
+        if (isa<ArraySubscriptExpr>(init_v)) {
+          ArraySubscriptExpr * arr = cast<ArraySubscriptExpr>(init_v);
+          Expr *base = arr->getBase()->IgnoreImpCasts();
+          if (isa<DeclRefExpr>(base)) {
+	    struct var_data * cur_var;
+            DeclRefExpr *ref = cast<DeclRefExpr>(base);
+
+            unsigned in_kernel = query_var (ref->getDecl()->getName().str(), &cur_var);//1 means out of kernel.
+	    cur_var->IdxChains.push_back(arr->getIdx()->IgnoreImpCasts());
+            if (cur_var && in_kernel == 1) {
+	      if (cur_var->usedByKernel == 0 || cur_var->usedByKernel == 2)
+	        cur_var->usedByKernel ++;
+            }
+
+          }
+
+        }
+      }
     }
     return true;
   }
@@ -465,8 +527,6 @@ public:
     for (DeclGroupRef::iterator b = DR.begin(), e = DR.end(); b != e; ++b) {
       // Traverse the declaration using our AST visitor.
       Visitor.TraverseDecl(*b);
-      if (Ctx->getSourceManager().isWrittenInMainFile((*b)->getLocation()))
-        (*b)->dump();
     }
     return true;
   }
@@ -495,18 +555,14 @@ private:
       unsigned int mems = 0;
       for (auto &mem_buf : k_info.mem_bufs) {
 	//Pre transfer mem 
-	if (mem_buf.type & 1) {
-	  if (mem_buf.type & 2)
+	if (mem_buf.type & 1) 
 	    mems++;
-	  if (mem_buf.type & 4)
-	    mems++;
-	}
-        else {
-	  if (mem_buf.type & 2) 
-	    overlap_mems++;
-	  if (mem_buf.type & 4)
-	    overlap_mems++;
-	}
+	if (mem_buf.type & 2) 
+	  overlap_mems++;
+	if (mem_buf.type & 4)
+	  overlap_mems++;
+	if (mem_buf.type & 8)
+	  mems++;
       }
       mems += overlap_mems;
 

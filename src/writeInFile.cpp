@@ -132,8 +132,8 @@ void WriteInFile::generateHostFile() {
 	break;
     }
     //Add hStreams init code
-    File <<Start<<"uint32_t places_per_domain = 1;\n"
-         <<Start<<"uint32_t logical_streams_per_place = "<<logical_streams<<";\n"
+    File <<Start<<"uint32_t logical_streams_per_place= 1;\n"
+         <<Start<<"uint32_t places_per_domain = "<<logical_streams<<";\n"
 	 <<Start<<"HSTR_OPTIONS hstreams_options;\n\n"
 	 <<Start<<"hStreams_GetCurrentOptions(&hstreams_options, sizeof(hstreams_options));\n"
 	 <<Start<<"hstreams_options.verbose = 0;\n"
@@ -242,8 +242,18 @@ void WriteInFile::generateHostFile() {
 	break;
     }
 
-    File<<Start<<"hStreams_ThreadSynchronize();\n"
-	<<Start<<"hStreams_app_fini();\n";
+    File<<Start<<"hStreams_ThreadSynchronize();\n";
+    for (unsigned i = 0;i < pre_xfers.size(); i++) {
+      File <<Start<<"CHECK_HSTR_RESULT(hStreams_app_xfer_memory("
+	   <<pre_xfers[i].buf_name<<", "<<pre_xfers[i].buf_name<<" ,"
+	   <<pre_xfers[i].size_string<<", 0, HSTR_SRC_TO_SINK, NULL));\n";
+    }
+    for (auto &mem_xfer : post_xfers) {
+      File <<Start<<"  CHECK_HSTR_RESULT(hStreams_app_xfer_memory("
+	   <<mem_xfer.buf_name<<", "<<mem_xfer.buf_name<<" ,"
+	   <<mem_xfer.size_string<<", 0, , HSTR_SINK_TO_SRC, NULL));\n";
+    }
+    File<<Start<<"hStreams_app_fini();\n";
   }
   if (exit_loop == LineNo) {
     LineNo++;
@@ -367,7 +377,9 @@ void WriteInFile::add_mem_xfer(struct mem_xfer m) {
   else if (m.type & 2) 
     h2d_xfers.push_back (m);
 
-  if (m.type & 4) 
+  if (m.type & 8)
+    post_xfers.push_back(m);
+  else if (m.type & 4) 
     d2h_xfers.push_back (m);
 }
 

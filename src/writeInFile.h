@@ -35,7 +35,7 @@ struct mem_xfer {
   std::string  buf_name;
   std::string size_string;
   std::string type_name;
-  unsigned type;//x1:pre_xfers. x1x:h2d. 1xx:d2h.
+  unsigned type;//x1:pre_xfers; x1x:h2d; 1xx:d2h; 1xxx: post_xfer
 };
 
 class WriteInFile {
@@ -76,6 +76,8 @@ class WriteInFile {
   std::vector<mem_xfer> h2d_xfers;
   //xfers that from device to host.
   std::vector<mem_xfer> d2h_xfers;
+  //mem xfers that is transfer after all kernel execution.
+  std::vector<mem_xfer> post_xfers;
 
   unsigned replace_line;
   unsigned enter_loop;
