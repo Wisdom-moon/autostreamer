@@ -223,8 +223,8 @@ private:
     k_info.exit_loop = 0;
     k_info.init_cite = 0;
     k_info.finish_cite = 0;
+    k_info.replace_line = 0;
     k_info.mem_bufs.clear();
-    k_info.replace_vars.clear();
     k_info.val_parms.clear();
     k_info.pointer_parms.clear();
     k_info.length_var.clear();
@@ -443,24 +443,7 @@ public:
         k_info.exit_loop = SM->getSpellingLineNumber(s->getLocEnd());
         k_info.finish_cite = k_info.exit_loop;
 
-	struct replace_info new_rep;
-	if (isa<DeclStmt>(init)) {
-	  VarDecl *var = cast<VarDecl>(cast<DeclStmt>(init)->getSingleDecl());
-	  Expr * init_val = var->getInit();
-	  new_rep.start_num = SM->getSpellingColumnNumber(init_val->getLocStart()) - 1;
-	  new_rep.size = 1;
-	  new_rep.name = "start_index";
-	  new_rep.line_no = SM->getSpellingLineNumber(init_val->getLocStart());
-	  k_info.replace_vars.push_back(new_rep);
-	}
-	else if (isa<BinaryOperator>(init)) {
-	  BinaryOperator * op = cast<BinaryOperator>(init);
-	  new_rep.start_num = SM->getSpellingColumnNumber(op->getRHS()->getLocStart()) - 1;
-	  new_rep.size = 1;
-	  new_rep.name = "start_index";
-	  new_rep.line_no = SM->getSpellingLineNumber(op->getRHS()->getLocStart());
-	  k_info.replace_vars.push_back(new_rep);
-	}
+        k_info.replace_line = SM->getSpellingLineNumber(s->getLocStart());
 
 	BinaryOperator *cond = cast<BinaryOperator>(for_stmt->getCond());
 	Expr *rhs = cond->getRHS()->IgnoreImpCasts();
@@ -472,11 +455,6 @@ public:
 	if (isa<DeclRefExpr>(rhs)) {
 	  DeclRefExpr *ref = cast<DeclRefExpr>(rhs);
           k_info.length_var = ref->getDecl()->getName().str();
-	  new_rep.start_num = SM->getSpellingColumnNumber(ref->getLocStart()) - 1;
-	  new_rep.size = k_info.length_var.size();
-	  new_rep.name = "end_index";
-	  new_rep.line_no = SM->getSpellingLineNumber(ref->getLocStart());
-	  k_info.replace_vars.push_back(new_rep);
   	}
       }
     }
@@ -730,6 +708,8 @@ public:
     generator.add_kernel_arg(var);
 
     generator.set_length_var(k_info->length_var);
+    generator.set_replace_line(k_info->replace_line);
+
     for (unsigned i = 0; i < k_info->val_parms.size(); i++)
     {
       generator.add_kernel_arg(k_info->val_parms[i]);
@@ -737,10 +717,6 @@ public:
     for (unsigned i = 0; i < k_info->pointer_parms.size(); i++)
     {
       generator.add_kernel_arg(k_info->pointer_parms[i]);
-    }
-    for (unsigned i = 0; i < k_info->replace_vars.size(); i++)
-    {
-      generator.add_replace_info(k_info->replace_vars[i]);
     }
     for (unsigned i = 0; i < k_info->mem_bufs.size(); i++)
     {

@@ -52,8 +52,8 @@ struct Kernel_Info {
   unsigned exit_loop;
   unsigned init_cite ;
   unsigned finish_cite;
+  unsigned replace_line;
   std::vector<mem_xfer> mem_bufs;
-  std::vector<replace_info> replace_vars;
   std::vector<var_decl> val_parms;
   std::vector<var_decl> pointer_parms;
   std::string length_var;

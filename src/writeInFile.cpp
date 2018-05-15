@@ -42,21 +42,19 @@ while (!Infile.eof()) {
   std::getline(Infile, Line);
 
   if (replace_line == LineNo) {
-    std::string Start;
-    unsigned j = 0;
-    for (unsigned i = 0; i < Line.size();) {
-      if ( j < replace_vars.size() && i == replace_vars[j].start_num ) {
-	i+= replace_vars[j].size;
-	Start += replace_vars[j].name;
-	j++;
-      }
-      else {
-	Start += Line[i];
-	i++;
-      }
+    std::string::size_type start_i = Line.find("for");
+    if (start_i != std::string::npos) {
+      std::string::size_type init_begin, init_end, cond_begin, cond_end;
+      init_begin = Line.find("=", start_i) + 1;
+      init_end = Line.find(";", init_begin);
+      cond_begin = Line.find("<", init_end) + 1;
+      cond_end = Line.find(";", cond_begin);
+
+      Line.replace(cond_begin, cond_end - cond_begin, " end_index");
+      Line.replace(init_begin, init_end - init_begin, " start_index");
     }
 
-    File << Start << "\n";
+    File << Line << "\n";
   }
   else if (is_include (Line) || in_loop(LineNo)) {
     File << Line << "\n";
@@ -350,9 +348,8 @@ void WriteInFile::add_local_var(struct var_decl var) {
   var_decls.push_back(var);
 }
 
-void WriteInFile::add_replace_info(struct replace_info r) {
-  replace_line = r.line_no;
-  replace_vars.push_back(r);
+void WriteInFile::set_replace_line(unsigned n) {
+  replace_line = n;
 }
 
 void WriteInFile::set_logical_streams(unsigned n) {

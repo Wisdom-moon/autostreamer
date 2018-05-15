@@ -24,13 +24,6 @@ struct var_decl {
   unsigned type;//00=value + fix, 01=point+fix, 10=value+var, 11=p+v.
 };
 
-struct replace_info {
-  unsigned start_num;
-  unsigned size;
-  std::string name;
-  unsigned line_no;
-};
-
 struct mem_xfer {
   std::string  buf_name;
   std::string size_string;
@@ -60,9 +53,6 @@ class WriteInFile {
   std::vector<var_decl> arg_decls;//all of kernel args.
   std::vector<var_decl> var_decls;//local define vars in kernel.
   std::vector<var_decl> fix_decls;//args that independ to streams and tasks.
-
-  //By defalut, the replace_info is ordered by its start_num.
-  std::vector<replace_info> replace_vars;
 
   unsigned logical_streams;
   unsigned task_blocks;
@@ -105,7 +95,7 @@ class WriteInFile {
   void set_finish_cite (unsigned LineNo);
   void add_kernel_arg(struct var_decl var);
   void add_local_var(struct var_decl var);
-  void add_replace_info(struct replace_info r);
+  void set_replace_line(unsigned n);
   void set_logical_streams(unsigned n);
   void set_task_blocks(unsigned n);
   void set_length_var(std::string name);
