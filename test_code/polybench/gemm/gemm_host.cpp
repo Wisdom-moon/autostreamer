@@ -120,9 +120,9 @@ int end_index = 0;
 uint64_t args[10];
 args[2] = (uint64_t) ni;
 args[3] = (uint64_t) nj;
-args[4] = (uint64_t) beta;
+args[4] = (uint64_t) *((uint64_t *) (&beta));
 args[5] = (uint64_t) nk;
-args[6] = (uint64_t) alpha;
+args[6] = (uint64_t) *((uint64_t *) (&alpha));
 args[7] = (uint64_t) C;
 args[8] = (uint64_t) A;
 args[9] = (uint64_t) B;
@@ -136,6 +136,7 @@ for (int i = 0; i < 4; i++)
     end_index ++;
   args[1] = (uint64_t) end_index;
   (hStreams_app_xfer_memory(&A[start_index][0], &A[start_index][0], (end_index - start_index) * sizeof (double [1200]), i % 2, HSTR_SRC_TO_SINK, NULL));
+  (hStreams_app_xfer_memory(&C[start_index][0], &C[start_index][0], (end_index - start_index) * sizeof (double [1100]), i % 2, HSTR_SRC_TO_SINK, NULL));
   (hStreams_EnqueueCompute(
 			i % 2,
 			"kernel",

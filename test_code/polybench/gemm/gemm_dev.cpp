@@ -24,16 +24,16 @@ kernel ( uint64_t arg0,
   int end_index = (int) arg1;
   int ni = (int) arg2;
   int nj = (int) arg3;
-  double beta = (double) arg4;
+  double beta = *((double *) (&arg4));
   int nk = (int) arg5;
-  double alpha = (double) arg6;
+  double alpha = *((double *) (&arg6));
   double (*C)[1100] = (double (*)[1100]) arg7;
   double (*A)[1200] = (double (*)[1200]) arg8;
   double (*B)[1100] = (double (*)[1100]) arg9;
   int i;
   int j;
   int k;
-#pragma omp parallel for
+#pragma omp parallel for private(i, j, k)
   for (i = start_index; i < end_index; i++) {
     for (j = 0; j < _PB_NJ; j++)
 	C[i][j] *= beta;

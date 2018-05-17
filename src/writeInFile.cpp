@@ -81,11 +81,25 @@ while (!Infile.eof()) {
 	decl_str += arg_decls[i].var_name;
       }
       else {
+        //Handle for mult-dim array, its decl should be TYPE (*name)[nn]
 	decl_str.insert(idx+1, arg_decls[i].var_name);
       }
-      File <<"  "<<decl_str
-	<<" = (" <<arg_decls[i].type_name
-	<<") arg" <<arg_decls[i].id <<";\n";
+
+      std::string::size_type t_idx = decl_str.find("double");
+      if (t_idx == std::string::npos)
+        t_idx = decl_str.find("float");
+      //Handle double/float scalar parameters, its conversion expression
+      //should be like this: TYPE a = *((TYPE *) (&arg));
+      if (idx == std::string::npos && t_idx != std::string::npos) {
+        File <<"  "<<decl_str
+	  <<" = *((" <<arg_decls[i].type_name
+	  <<" *) (&arg" <<arg_decls[i].id <<"));\n";
+      }
+      else {
+        File <<"  "<<decl_str
+	  <<" = (" <<arg_decls[i].type_name
+	  <<") arg" <<arg_decls[i].id <<";\n";
+      }
     }
     //Add local variables decl.
     for (unsigned i = 0; i < var_decls.size(); i++) {
@@ -183,7 +197,19 @@ void WriteInFile::generateHostFile() {
     //Add hStreams kernel arguments set code
     File <<Start<<"uint64_t args["<<kernel_args<<"];\n";
     for (unsigned i = 0; i < fix_decls.size(); i++) {
-      File <<Start<<"args["<<fix_decls[i].id<<"] = (uint64_t) "<<fix_decls[i].var_name<<";\n";
+      std::string::size_type idx = fix_decls[i].type_name.find("*");
+      if (idx == std::string::npos) {
+        idx = fix_decls[i].type_name.find("double");
+        if (idx == std::string::npos)
+	  idx = fix_decls[i].type_name.find("float");
+      } else
+        idx = std::string::npos;
+
+      File <<Start<<"args["<<fix_decls[i].id<<"] = (uint64_t) ";
+      if (idx != std::string::npos)
+        File <<"*((uint64_t *) (&"<<fix_decls[i].var_name<<"));\n";
+      else
+        File <<fix_decls[i].var_name<<";\n";
     }
 
     //Add hStreams synchronize code

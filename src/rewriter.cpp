@@ -152,6 +152,7 @@ private:
   //write name only occurs when op is "=", and lvalue is the write memory.
   //All other mem access is read.
   //return 0: is a assignment opt. 1: others.
+  //return 2: *=/+= compound assignment.
   int check_mem_access (BinaryOperator *op, std::string &lhs,
 			std::vector<Expr *> &lhs_idx,
 			std::string &rhs, 
@@ -159,6 +160,9 @@ private:
     int ret = 1;
     if (op->isAssignmentOp()) {
       ret = 0;
+    }
+    if (op->isCompoundAssignmentOp()) {
+      ret = 2;
     }
 
     if (isa<ArraySubscriptExpr>(op->getRHS()->IgnoreImpCasts())) {
@@ -610,7 +614,8 @@ public:
       if (process_state == 1) {
         struct var_data *cur_var;
 	//lhs is the write to memory.
-	if (kind == 0 && !lhs.empty()) {
+	//For =/+=/*= assignment operations.
+	if (( kind == 0 || kind == 2)  && !lhs.empty()) {
           unsigned out_kernel = query_var (lhs, &cur_var);//1 means out of kernel.
 	  cur_var->IdxChains.push_back(lhs_idx);
 	  analysis_index (lhs_idx[0], cur_var->min_value, cur_var->max_value);
@@ -620,7 +625,8 @@ public:
 	  }
 	}
 	// lhs and rhs is read memory.
-	else {
+	//For *=/+= or other non-assignment operations.
+	if (kind == 1 || kind == 2) {
 	  if (!lhs.empty()) {
             unsigned out_kernel = query_var (lhs, &cur_var);//1 means out of kernel.
 	    cur_var->IdxChains.push_back(lhs_idx);
