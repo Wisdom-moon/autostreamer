@@ -12,9 +12,36 @@ static llvm::cl::OptionCategory ToolingSampleCategory("Tooling Sample");
 
 // By implementing RecursiveASTVisitor, we can specify which AST nodes
 // we're interested in by overriding relevant methods.
+
+
 class MyASTVisitor : public RecursiveASTVisitor<MyASTVisitor> {
 private:
 
+  //To find is var is used in expr e.
+  bool find_usage (Expr * e, ValueDecl * var) {
+    e = e->IgnoreImpCasts();
+    if (isa<DeclRefExpr>(e)) {
+      DeclRefExpr *ref = cast<DeclRefExpr> (e);
+      if (ref->getDecl() == var)
+	return true;
+    }
+    else if (isa<BinaryOperator>(e)) {
+      BinaryOperator *op = cast<BinaryOperator>(e);
+      if (find_usage (op->getLHS(), var))
+        return true;
+      if (find_usage (op->getRHS(), var))
+        return true;
+    }
+    else if (isa<UnaryOperator>(e)) {
+      UnaryOperator *op = cast<UnaryOperator>(e);
+      if (find_usage (op->getSubExpr(), var))
+        return true;
+    }
+
+    return false;
+  }
+
+  //Analysis binary operator, give its min value and max value.
   void analysis_bin_op (BinaryOperator *op, std::string &min, std::string &max) {
 
     Expr *lhs = op->getLHS()->IgnoreImpCasts();
@@ -68,7 +95,10 @@ private:
     }
   }
 
-  void analysis_index (Expr *idx, std::string &min, std::string &max) {
+  //Analysis Expr vector(arry's 1st dim index), return its min value and max value.
+  //Because the type of mult-array is a pointer that point to 
+  //(dim -1) mult-array
+  void analysis_index (Expr * idx, std::string &min, std::string &max) {
     if (idx == NULL)
       return ;
 
@@ -84,20 +114,37 @@ private:
       query_var (ref->getDecl()->getName().str(), &cur_var);
       if (cur_var && cur_var->type == 1) {
         if (!cur_var->min_value.empty())
-	  min += cur_var->min_value;
+	  min = cur_var->min_value;
 	else
-	  min += cur_var->name;
+	  min = cur_var->name;
 	if (!cur_var->max_value.empty())
-	  max += cur_var->max_value;
+	  max = cur_var->max_value;
 	else
-	  max += cur_var->name;
+	  max = cur_var->name;
+        }
       }
-    }
     else {
-      min += get_str(idx);
-      max += get_str(idx);
+      min = get_str(idx);
+      max = get_str(idx);
     }
 
+    return ;
+  }
+
+  //Analysis ArraySubscriptExpr, maybe mult dim array.
+  void analysis_array (ArraySubscriptExpr *arr, std::string &base_name,
+			std::vector<Expr *> &idx_arry) {
+    Expr *base = arr->getBase()->IgnoreImpCasts();
+    Expr *idx  = arr->getIdx()->IgnoreImpCasts();
+    if (isa<DeclRefExpr>(base)) {
+      DeclRefExpr *ref = cast<DeclRefExpr>(base);
+      base_name = ref->getDecl()->getName().str();
+      idx_arry.push_back(idx);
+    }
+    else if (isa<ArraySubscriptExpr>(base)){
+      analysis_array (cast<ArraySubscriptExpr>(base), base_name, idx_arry);
+      idx_arry.push_back(idx);
+    }
     return ;
   }
 
@@ -105,24 +152,18 @@ private:
   //write name only occurs when op is "=", and lvalue is the write memory.
   //All other mem access is read.
   //return 0: is a assignment opt. 1: others.
-  int check_mem_access (BinaryOperator *op, std::string &lhs, Expr **lhs_idx,
-			 std::string &rhs, Expr **rhs_idx) {
+  int check_mem_access (BinaryOperator *op, std::string &lhs,
+			std::vector<Expr *> &lhs_idx,
+			std::string &rhs, 
+			std::vector<Expr *> &rhs_idx) {
     int ret = 1;
     if (op->isAssignmentOp()) {
       ret = 0;
     }
 
-    *lhs_idx = NULL;
-    *rhs_idx = NULL;
- 
     if (isa<ArraySubscriptExpr>(op->getRHS()->IgnoreImpCasts())) {
       ArraySubscriptExpr * arr = cast<ArraySubscriptExpr>(op->getRHS()->IgnoreImpCasts());
-      Expr *base = arr->getBase()->IgnoreImpCasts();
-      *rhs_idx = arr->getIdx()->IgnoreImpCasts();
-      if (isa<DeclRefExpr>(base)) {
-        DeclRefExpr *ref = cast<DeclRefExpr>(base);
-        rhs = ref->getDecl()->getName().str();
-      }
+      analysis_array (arr, rhs, rhs_idx);
     }
     else if (isa<DeclRefExpr>(op->getRHS()->IgnoreImpCasts())) {
       DeclRefExpr *ref = cast<DeclRefExpr>(op->getRHS()->IgnoreImpCasts());
@@ -134,12 +175,7 @@ private:
 
     if (isa<ArraySubscriptExpr>(op->getLHS()->IgnoreImpCasts())) {
       ArraySubscriptExpr * arr = cast<ArraySubscriptExpr>(op->getLHS()->IgnoreImpCasts());
-      Expr *base = arr->getBase()->IgnoreImpCasts();
-      *lhs_idx = arr->getIdx()->IgnoreImpCasts();
-      if (isa<DeclRefExpr>(base)) {
-        DeclRefExpr *ref = cast<DeclRefExpr>(base);
-        lhs = ref->getDecl()->getName().str();
-      }
+      analysis_array (arr, lhs, lhs_idx);
     }
     else if (isa<DeclRefExpr>(op->getLHS()->IgnoreImpCasts())) {
       DeclRefExpr *ref = cast<DeclRefExpr>(op->getLHS()->IgnoreImpCasts());
@@ -228,6 +264,7 @@ private:
     k_info.val_parms.clear();
     k_info.pointer_parms.clear();
     k_info.length_var.clear();
+    k_info.local_parms.clear();
     k_info.loop_index = NULL;
     k_info.insns = 0;
   }
@@ -334,9 +371,16 @@ public:
 	      struct var_data cur_var = val_pair.second;
 	      new_mem.buf_name = cur_var.name;
 	      new_mem.type_name = cur_var.type_str;
-	      int idx = new_mem.type_name.find_last_of("*");
-	      if (idx > 0)
-    	        new_mem.type_name.erase(idx, 1);
+	      int idx = new_mem.type_name.find("const");
+              if (idx >= 0)
+		new_mem.type_name.erase(idx, 5);
+	      new_mem.elem_type = new_mem.type_name;
+	      idx = new_mem.elem_type.find("(*)");
+	      if (idx >= 0) {
+		new_mem.elem_type.erase(idx, 3);
+	      }
+	      else if ((idx =  new_mem.elem_type.find("*")) >= 0)
+		new_mem.elem_type.erase(idx, 1);
 
 	      if (!cur_var.size_str.empty())
 	        new_mem.size_string = cur_var.size_str;
@@ -349,30 +393,36 @@ public:
 		new_mem.size_string += cur_var.min_value;
 		new_mem.size_string += ") + 1)";
 		new_mem.size_string += "* sizeof (";
-		new_mem.size_string += new_mem.type_name;
+		new_mem.size_string += new_mem.elem_type;
 		new_mem.size_string += ")";
 	      }
-	      bool is_overlap = true;
-	      for (auto &idx : cur_var.IdxChains) {
-	    	if (idx && isa<DeclRefExpr>(idx)) {
+	      //is_overlap == true means have data overlap between streams.
+	      bool is_overlap = false;
+	      //Need to fixup: how to analysis overlap memory access?
+	      for (auto &idx_arry : cur_var.IdxChains) {
+		Expr * idx = idx_arry[0];
+ 		if (idx && isa<DeclRefExpr>(idx)) {
 		  DeclRefExpr *ref = cast<DeclRefExpr>(idx);
-		  if (ref->getDecl() != k_info.loop_index)
-		    is_overlap = false;
+		  if (ref->getDecl() != k_info.loop_index) {
+		    is_overlap = true;
+		  }
 		}
-	        else
-		  is_overlap = false;
+		else if (idx && find_usage (idx, k_info.loop_index))
+ 		  is_overlap = true;
+
+		new_mem.dim = idx_arry.size();
 	      }
 	      switch (cur_var.usedByKernel) {
 		case 1:
-	  	  new_mem.type = is_overlap ? 2 : 1;
+	  	  new_mem.type = is_overlap ? 1 : 2;
 	   	  k_info.mem_bufs.push_back(new_mem);
 		  break;
 		case 2:
-	  	  new_mem.type = is_overlap ? 4 : 8;
+	  	  new_mem.type = is_overlap ? 8 : 4;
 	   	  k_info.mem_bufs.push_back(new_mem);
 		  break;
 		case 3:
-	  	  new_mem.type = is_overlap ? 6 : 9;
+	  	  new_mem.type = is_overlap ? 9 : 6;
 	   	  k_info.mem_bufs.push_back(new_mem);
 		  break;
 		default:
@@ -464,8 +514,8 @@ public:
       DeclRefExpr * var_ref = cast<DeclRefExpr>(s);
 
       struct var_data *cur_var;
-      unsigned in_kernel = query_var (var_ref->getDecl()->getName().str(), &cur_var);//1 means out of kernel.
-      if (cur_var && in_kernel == 1) {
+      unsigned out_kernel = query_var (var_ref->getDecl()->getName().str(), &cur_var);//1 means out of kernel.
+      if (cur_var && out_kernel == 1) {
         struct var_decl new_var;
         new_var.type_name = cur_var->type_str;
         new_var.var_name = cur_var->name;
@@ -487,9 +537,9 @@ public:
     if (isa<BinaryOperator>(s)) {
       BinaryOperator *op = cast<BinaryOperator>(s);
       std::string lhs, rhs;
-      Expr *lhs_idx;
-      Expr *rhs_idx;
-      int kind = check_mem_access (op, lhs, &lhs_idx, rhs, &rhs_idx);//0: assign.
+      std::vector<Expr *> lhs_idx;
+      std::vector<Expr *> rhs_idx;
+      int kind = check_mem_access (op, lhs, lhs_idx, rhs, rhs_idx);//0: assign.
 
 /*
       #ifdef DEBUG_INFO
@@ -505,11 +555,30 @@ public:
 	}
       }
 
+      //Handle stmt: scalar_var = xxx;
+      //If scalar_var is first used in kernel, then there is no need to transfer its
+      //Value.
+      if (process_state == 1 && kind == 0 && lhs.empty()) {
+	Expr *lhs = op->getLHS()->IgnoreImpCasts();
+        if (isa<DeclRefExpr>(lhs)) {
+	  DeclRefExpr *ref = cast<DeclRefExpr>(lhs);
+	  struct var_data *cur_var;
+	  unsigned out_kernel = query_var (ref->getDecl()->getName().str(), &cur_var);
+          if (cur_var && out_kernel == 1 && cur_var->isKernelArg == false) {
+            struct var_decl new_var;
+            new_var.type_name = cur_var->type_str;
+            new_var.var_name = cur_var->name;
+            k_info.local_parms.push_back(new_var);
+	    cur_var->isKernelArg = true;
+	  }
+        }
+      }
+
       //Acorrding malloc function, set the size_str for var_data.
       if (kind == 0 && !lhs.empty()) {
         struct var_data *cur_var;
-        unsigned in_kernel = query_var (lhs, &cur_var);
-	if (cur_var && in_kernel == 1) {
+        unsigned out_kernel = query_var (lhs, &cur_var);
+	if (cur_var && out_kernel == 1) {
 	  if (isa<CStyleCastExpr>(op->getRHS())) {
 	    CastExpr * cast_e = cast<CastExpr>(op->getRHS());
 	    if (isa<CallExpr>(cast_e->getSubExpr())) {
@@ -542,10 +611,10 @@ public:
         struct var_data *cur_var;
 	//lhs is the write to memory.
 	if (kind == 0 && !lhs.empty()) {
-          unsigned in_kernel = query_var (lhs, &cur_var);//1 means out of kernel.
+          unsigned out_kernel = query_var (lhs, &cur_var);//1 means out of kernel.
 	  cur_var->IdxChains.push_back(lhs_idx);
-	  analysis_index (lhs_idx, cur_var->min_value, cur_var->max_value);
-          if (cur_var && in_kernel == 1) {
+	  analysis_index (lhs_idx[0], cur_var->min_value, cur_var->max_value);
+          if (cur_var && out_kernel == 1) {
 	    if (cur_var->usedByKernel < 2)
 	      cur_var->usedByKernel += 2;
 	  }
@@ -553,19 +622,19 @@ public:
 	// lhs and rhs is read memory.
 	else {
 	  if (!lhs.empty()) {
-            unsigned in_kernel = query_var (lhs, &cur_var);//1 means out of kernel.
+            unsigned out_kernel = query_var (lhs, &cur_var);//1 means out of kernel.
 	    cur_var->IdxChains.push_back(lhs_idx);
-	    analysis_index (lhs_idx, cur_var->min_value, cur_var->max_value);
-            if (in_kernel == 1) {
+	    analysis_index (lhs_idx[0], cur_var->min_value, cur_var->max_value);
+            if (out_kernel == 1) {
 	      if (cur_var->usedByKernel == 0 || cur_var->usedByKernel == 2)
 	        cur_var->usedByKernel ++;
 	    }
 	  }
 	  if (!rhs.empty()) {
-            unsigned in_kernel = query_var (rhs, &cur_var);//1 means out of kernel.
+            unsigned out_kernel = query_var (rhs, &cur_var);//1 means out of kernel.
 	    cur_var->IdxChains.push_back(rhs_idx);
-	    analysis_index (rhs_idx, cur_var->min_value, cur_var->max_value);
-            if (cur_var && in_kernel == 1) {
+	    analysis_index (rhs_idx[0], cur_var->min_value, cur_var->max_value);
+            if (cur_var && out_kernel == 1) {
 	      if (cur_var->usedByKernel == 0 || cur_var->usedByKernel == 2)
 	        cur_var->usedByKernel ++;
 	    }
@@ -586,22 +655,17 @@ public:
         Expr *init_v = d->getInit()->IgnoreImpCasts();
         if (isa<ArraySubscriptExpr>(init_v)) {
           ArraySubscriptExpr * arr = cast<ArraySubscriptExpr>(init_v);
-          Expr *base = arr->getBase()->IgnoreImpCasts();
-          if (isa<DeclRefExpr>(base)) {
-	    struct var_data * cur_var;
-            DeclRefExpr *ref = cast<DeclRefExpr>(base);
-
-            unsigned in_kernel = query_var (ref->getDecl()->getName().str(), &cur_var);//1 means out of kernel.
-	    cur_var->IdxChains.push_back(arr->getIdx()->IgnoreImpCasts());
-	    analysis_index (arr->getIdx()->IgnoreImpCasts(),
-			    cur_var->min_value, cur_var->max_value);
-            if (cur_var && in_kernel == 1) {
-	      if (cur_var->usedByKernel == 0 || cur_var->usedByKernel == 2)
-	        cur_var->usedByKernel ++;
-            }
-
+	  std::string base_name;
+	  std::vector<Expr *> idx_arry;
+  	  analysis_array (arr, base_name, idx_arry);
+	  struct var_data * cur_var;
+          unsigned out_kernel = query_var (base_name, &cur_var);//1 means out of kernel.
+	  cur_var->IdxChains.push_back(idx_arry);
+	  analysis_index (idx_arry[0], cur_var->min_value, cur_var->max_value);
+          if (cur_var && out_kernel == 1) {
+	    if (cur_var->usedByKernel == 0 || cur_var->usedByKernel == 2)
+	      cur_var->usedByKernel ++;
           }
-
         }
       }
     }
@@ -717,6 +781,10 @@ public:
     for (unsigned i = 0; i < k_info->pointer_parms.size(); i++)
     {
       generator.add_kernel_arg(k_info->pointer_parms[i]);
+    }
+    for (unsigned i = 0; i < k_info->local_parms.size(); i++)
+    {
+      generator.add_local_var(k_info->local_parms[i]);
     }
     for (unsigned i = 0; i < k_info->mem_bufs.size(); i++)
     {

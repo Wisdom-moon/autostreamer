@@ -74,8 +74,16 @@ while (!Infile.eof()) {
 
     //Add arguments decl.
     for (unsigned i = 0; i < arg_decls.size(); i++) {
-      File <<"  "<<arg_decls[i].type_name
-	<<" "<<arg_decls[i].var_name
+      std::string decl_str = arg_decls[i].type_name;
+      std::string::size_type idx = decl_str.find("*");
+      if (idx == std::string::npos) {
+        decl_str += " ";
+	decl_str += arg_decls[i].var_name;
+      }
+      else {
+	decl_str.insert(idx+1, arg_decls[i].var_name);
+      }
+      File <<"  "<<decl_str
 	<<" = (" <<arg_decls[i].type_name
 	<<") arg" <<arg_decls[i].id <<";\n";
     }
@@ -152,16 +160,16 @@ void WriteInFile::generateHostFile() {
     //Add hStreams buf create code
     for (unsigned i = 0; i < mem_bufs.size(); i++) {
       File <<Start<<"(hStreams_app_create_buf("
-	   <<"("<<mem_bufs[i].type_name<<"*)"
+	   <<"("<<mem_bufs[i].type_name<<")"
 	<<mem_bufs[i].buf_name<<", "<<mem_bufs[i].size_string<<"));\n";
     }
 
     //Add hStreams mem transfer code
     for (unsigned i = 0;i < pre_xfers.size(); i++) {
       File <<Start<<"(hStreams_app_xfer_memory("
-	   <<"("<<mem_bufs[i].type_name<<"*)"
+	   <<"("<<mem_bufs[i].type_name<<")"
 	   <<pre_xfers[i].buf_name<<", "
-	   <<"("<<mem_bufs[i].type_name<<"*)"
+	   <<"("<<mem_bufs[i].type_name<<")"
 	   <<pre_xfers[i].buf_name<<" ,"
 	   <<pre_xfers[i].size_string<<", 0, HSTR_SRC_TO_SINK, NULL));\n";
     }
@@ -203,8 +211,13 @@ void WriteInFile::generateHostFile() {
 	 <<Start<<"  args[1] = (uint64_t) end_index;\n";
     for (unsigned i = 0;i < h2d_xfers.size(); i++) {
       File <<Start<<"  (hStreams_app_xfer_memory(&"
-	   <<h2d_xfers[i].buf_name<<"[start_index], &"<<h2d_xfers[i].buf_name<<"[start_index], "
-	   <<"(end_index - start_index) * sizeof ("<<h2d_xfers[i].type_name<<"), "
+	   <<h2d_xfers[i].buf_name<<"[start_index]";
+      for (unsigned j = 1; j < h2d_xfers[i].dim; j++)
+	File <<"[0]";
+      File <<", &"<<h2d_xfers[i].buf_name<<"[start_index]";
+      for (unsigned j = 1; j < h2d_xfers[i].dim; j++)
+	File <<"[0]";
+      File <<", (end_index - start_index) * sizeof ("<<h2d_xfers[i].elem_type<<"), "
 	   <<"i \% "<<logical_streams<<", HSTR_SRC_TO_SINK, NULL));\n";
     }
 
@@ -218,8 +231,13 @@ void WriteInFile::generateHostFile() {
 
     for (unsigned i = 0;i < d2h_xfers.size(); i++) {
       File <<Start<<"  (hStreams_app_xfer_memory(&"
-	   <<d2h_xfers[i].buf_name<<"[start_index], &"<<d2h_xfers[i].buf_name<<"[start_index], "
-	   <<"(end_index - start_index) * sizeof ("<<d2h_xfers[i].type_name<<"), "
+	   <<d2h_xfers[i].buf_name<<"[start_index]";
+      for (unsigned j = 1; j < d2h_xfers[i].dim; j++)
+	File <<"[0]";
+      File <<", &"<<d2h_xfers[i].buf_name<<"[start_index]";
+      for (unsigned j = 1; j < d2h_xfers[i].dim; j++)
+	File <<"[0]";
+      File <<", (end_index - start_index) * sizeof ("<<d2h_xfers[i].elem_type<<"), "
 	   <<"i \% "<<logical_streams<<", HSTR_SINK_TO_SRC, NULL));\n";
     }
 
@@ -365,10 +383,6 @@ void WriteInFile::set_length_var(std::string name) {
 }
 
 void WriteInFile::add_mem_xfer(struct mem_xfer m) {
-  int idx = m.type_name.find("const");
-  if (idx >= 0)
-    m.type_name.erase(idx, 5);
-
   mem_bufs.push_back (m);
 
   if (m.type & 1) 

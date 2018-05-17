@@ -28,6 +28,8 @@ struct mem_xfer {
   std::string  buf_name;
   std::string size_string;
   std::string type_name;
+  std::string elem_type;
+  unsigned dim;//The dim of arry;
   unsigned type;//x1:pre_xfers; x1x:h2d; 1xx:d2h; 1xxx: post_xfer
 };
 

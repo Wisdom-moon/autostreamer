@@ -41,10 +41,11 @@ struct var_data {
   std::string max_value;
   //0: not used in kernel; 1: read only in kernel; 
   //2: write only in kernel; 3:r+w in kernel;
+  //This attr is only used by pointer.
   unsigned int usedByKernel;
   bool isKernelArg;
   //For memory access in kernel, its Index expr chain.
-  std::vector<Expr *> IdxChains;
+  std::vector<std::vector<Expr *>> IdxChains;
 };
 
 struct Kernel_Info {
@@ -56,6 +57,7 @@ struct Kernel_Info {
   std::vector<mem_xfer> mem_bufs;
   std::vector<var_decl> val_parms;
   std::vector<var_decl> pointer_parms;
+  std::vector<var_decl> local_parms;
   std::string length_var;
 
   //The omp parallel for iteration index variable declaration
