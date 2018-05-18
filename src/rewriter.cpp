@@ -647,6 +647,16 @@ public:
 	      cur_var->usedByKernel += 2;
 	  }
 	}
+	//rhs is the read to memory in = assignment operations.
+ 	if ( kind == 0 && !rhs.empty()) {
+          unsigned out_kernel = query_var (rhs, &cur_var);//1 means out of kernel.
+	  cur_var->IdxChains.push_back(rhs_idx);
+	  analysis_index (rhs_idx[0], cur_var->min_value, cur_var->max_value);
+          if (cur_var && out_kernel == 1) {
+	    if (cur_var->usedByKernel == 0 || cur_var->usedByKernel == 2)
+	      cur_var->usedByKernel ++;
+	  }
+	}
 	// lhs and rhs is read memory.
 	//For *=/+= or other non-assignment operations.
 	if (kind == 1 || kind == 2) {
