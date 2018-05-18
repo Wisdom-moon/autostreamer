@@ -74,8 +74,9 @@ class WriteInFile {
   unsigned replace_line;
   unsigned enter_loop;
   unsigned exit_loop;
-  unsigned init_cite ;
+  unsigned init_cite;
   unsigned finish_cite;
+  unsigned create_mem_cite;
 
   //===---------------------------------------------------------------------===
   //                           Utility functions 
@@ -95,6 +96,7 @@ class WriteInFile {
   void set_exit_loop (unsigned LineNo);
   void set_init_cite (unsigned LineNo);
   void set_finish_cite (unsigned LineNo);
+  void set_create_mem_cite (unsigned LineNo);
   void add_kernel_arg(struct var_decl var);
   void add_local_var(struct var_decl var);
   void set_replace_line(unsigned n);

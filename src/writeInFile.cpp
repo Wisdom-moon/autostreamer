@@ -170,14 +170,34 @@ void WriteInFile::generateHostFile() {
 	 <<Start<<"  printf(\"hstreams_app_init failed!\\n\");\n"
 	 <<Start<<"  exit(-1);\n"
 	 <<Start<<"}\n\n";
-
+  }
+  if (create_mem_cite == LineNo) {
+    std::string Start;
+    for (std::string::iterator It = Line.begin(), E = Line.end(); It != E;
+	++ It) {
+      if (*It == ' ' || *It == '\t') {
+	Start += *It;
+      }
+      else
+	break;
+    }
     //Add hStreams buf create code
     for (unsigned i = 0; i < mem_bufs.size(); i++) {
       File <<Start<<"(hStreams_app_create_buf("
 	   <<"("<<mem_bufs[i].type_name<<")"
 	<<mem_bufs[i].buf_name<<", "<<mem_bufs[i].size_string<<"));\n";
     }
-
+  }
+  if (enter_loop == LineNo) {
+    std::string Start;
+    for (std::string::iterator It = Line.begin(), E = Line.end(); It != E;
+	++ It) {
+      if (*It == ' ' || *It == '\t') {
+	Start += *It;
+      }
+      else
+	break;
+    }
     //Add hStreams mem transfer code
     for (unsigned i = 0;i < pre_xfers.size(); i++) {
       File <<Start<<"(hStreams_app_xfer_memory("
@@ -214,17 +234,7 @@ void WriteInFile::generateHostFile() {
 
     //Add hStreams synchronize code
     File <<Start<<"hStreams_ThreadSynchronize();\n";
-  }
-  if (enter_loop == LineNo) {
-    std::string Start;
-    for (std::string::iterator It = Line.begin(), E = Line.end(); It != E;
-	++ It) {
-      if (*It == ' ' || *It == '\t') {
-	Start += *It;
-      }
-      else
-	break;
-    }
+
     //Init start_index.
     File <<Start<<"start_index = 0;\n";
 
@@ -270,6 +280,16 @@ void WriteInFile::generateHostFile() {
     File <<Start<<"  start_index = end_index;\n"
          <<Start<<"}\n";
 
+    File<<Start<<"hStreams_ThreadSynchronize();\n";
+    for (auto &mem_xfer : post_xfers) {
+      File <<Start<<"  (hStreams_app_xfer_memory("
+	   <<"("<<mem_xfer.type_name<<"*)"
+	   <<mem_xfer.buf_name<<", "
+	   <<"("<<mem_xfer.type_name<<"*)"
+	   <<mem_xfer.buf_name<<" ,"
+	   <<mem_xfer.size_string<<", 0, HSTR_SINK_TO_SRC, NULL));\n";
+    }
+
     LineNo++;
     continue;
   }
@@ -288,15 +308,6 @@ void WriteInFile::generateHostFile() {
 	break;
     }
 
-    File<<Start<<"hStreams_ThreadSynchronize();\n";
-    for (auto &mem_xfer : post_xfers) {
-      File <<Start<<"  (hStreams_app_xfer_memory("
-	   <<"("<<mem_xfer.type_name<<"*)"
-	   <<mem_xfer.buf_name<<", "
-	   <<"("<<mem_xfer.type_name<<"*)"
-	   <<mem_xfer.buf_name<<" ,"
-	   <<mem_xfer.size_string<<", 0, HSTR_SINK_TO_SRC, NULL));\n";
-    }
     File<<Start<<"hStreams_app_fini();\n";
   }
   if (exit_loop == LineNo) {
@@ -371,6 +382,9 @@ void WriteInFile::set_init_cite(unsigned LineNo) {
 
 void WriteInFile::set_finish_cite(unsigned LineNo) {
   finish_cite = LineNo;
+}
+void WriteInFile::set_create_mem_cite(unsigned LineNo) {
+  create_mem_cite = LineNo;
 }
 
 void WriteInFile::add_kernel_arg(struct var_decl var) {

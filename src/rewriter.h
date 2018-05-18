@@ -46,6 +46,8 @@ struct var_data {
   bool isKernelArg;
   //For memory access in kernel, its Index expr chain.
   std::vector<std::vector<Expr *>> IdxChains;
+  //Its declare stmt.
+  Decl * decl_stmt;
 };
 
 struct Kernel_Info {
@@ -53,6 +55,7 @@ struct Kernel_Info {
   unsigned exit_loop;
   unsigned init_cite ;
   unsigned finish_cite;
+  unsigned create_mem_cite;
   unsigned replace_line;
   std::vector<mem_xfer> mem_bufs;
   std::vector<var_decl> val_parms;

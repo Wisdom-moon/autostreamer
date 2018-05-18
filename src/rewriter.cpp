@@ -201,8 +201,11 @@ private:
       ret = ref->getDecl()->getName().str();
     }
     else {
-      std::string str1 = SM->getCharacterData(s->getLocStart());
-      std::string str2 = SM->getCharacterData(s->getLocEnd());
+      //Convert into ExpansionLoc, is because s may be Macro and be expanded.
+      //the default is SpellingLoc, which is the Macro define line.
+      //ExpansionLoc is the loc that be expanded.
+      std::string str1 = SM->getCharacterData(SM->getExpansionLoc(s->getLocStart()));
+      std::string str2 = SM->getCharacterData(SM->getExpansionLoc(s->getLocEnd()));
       unsigned len = str1.size() - str2.size() + 1;
       ret = str1.substr(0, len);
     }
@@ -236,6 +239,7 @@ private:
     struct var_data * new_var;
     if (cur_scope.var_table.find(d->getName().str()) == cur_scope.var_table.end()) {
       struct var_data new_var;
+      new_var.decl_stmt = d;
       new_var.name = d->getName().str();
       new_var.type_str = d->getType().getAsString();
       int f_index;
@@ -263,6 +267,7 @@ private:
     k_info.exit_loop = 0;
     k_info.init_cite = 0;
     k_info.finish_cite = 0;
+    k_info.create_mem_cite = 0;
     k_info.replace_line = 0;
     k_info.mem_bufs.clear();
     k_info.val_parms.clear();
@@ -291,10 +296,10 @@ public:
       struct Scope_data &cur_scope = Scope_stack.back();
       struct Scope_data new_scope;
       new_scope.p_func = NULL;
-      new_scope.sline = SM->getSpellingLineNumber(st->getLocStart());
-      new_scope.scol = SM->getSpellingColumnNumber(st->getLocStart());
-      new_scope.eline = SM->getSpellingLineNumber(st->getLocEnd());
-      new_scope.ecol = SM->getSpellingColumnNumber(st->getLocEnd());
+      new_scope.sline = SM->getExpansionLineNumber(st->getLocStart());
+      new_scope.scol = SM->getExpansionColumnNumber(st->getLocStart());
+      new_scope.eline = SM->getExpansionLineNumber(st->getLocEnd());
+      new_scope.ecol = SM->getExpansionColumnNumber(st->getLocEnd());
 
     if (isa<CompoundStmt>(st) || isa<WhileStmt>(st) || isa<CXXCatchStmt>(st)
        || isa<CXXForRangeStmt>(st) || isa<CXXTryStmt>(st) || isa<DoStmt>(st)
@@ -303,8 +308,13 @@ public:
        || isa<SwitchCase>(st) || isa<SwitchStmt>(st) || isa<WhileStmt>(st)
        || isa<CapturedStmt>(st)) {
       if (isa<CompoundStmt>(st)) {
+	CompoundStmt *c_st = cast<CompoundStmt>(st);
 	if (cur_scope.p_func) {
 	  new_scope.type = 1;
+          k_info.init_cite = SM->getExpansionLineNumber(
+					c_st->body_front()->getLocStart());
+          k_info.finish_cite = SM->getExpansionLineNumber(
+                                        c_st->getLocEnd());
 	  //Add ParmVarDecl to new_scope.var_table
 	  if (SM->isWrittenInMainFile (cur_scope.p_func->getLocation())) {
 	    for (unsigned i = 0; i < cur_scope.p_func->getNumParams(); i++) {
@@ -346,8 +356,7 @@ public:
     }
     Stmt::StmtClass sc = st->getStmtClass();
     if (sc == clang::Stmt::OMPParallelForDirectiveClass) {
-      k_info.enter_loop = SM->getSpellingLineNumber(st->getLocStart());
-      k_info.init_cite = k_info.enter_loop;
+      k_info.enter_loop = SM->getExpansionLineNumber(st->getLocStart());
       new_scope.type = 13;
       Scope_stack.push_back(new_scope);
     }
@@ -370,6 +379,7 @@ public:
 	if (Scope_stack.back().type == 13) {
           //Add mem_xfer to kernel_info here.
 	  struct mem_xfer new_mem;
+	  unsigned last_decl_line = 0;
 	  for (auto &scope : Scope_stack) {
 	    for (auto &val_pair : scope.var_table) {
 	      struct var_data cur_var = val_pair.second;
@@ -416,6 +426,12 @@ public:
 
 		new_mem.dim = idx_arry.size();
 	      }
+	      if (cur_var.usedByKernel > 0) {
+		unsigned decl_line = SM->getExpansionLineNumber(
+					cur_var.decl_stmt->getLocStart());
+		if (last_decl_line < decl_line)
+		  last_decl_line = decl_line;
+	      }
 	      switch (cur_var.usedByKernel) {
 		case 1:
 	  	  new_mem.type = is_overlap ? 1 : 2;
@@ -437,6 +453,7 @@ public:
 	    cur_var.IdxChains.clear();
 	    }
 	  }
+	  k_info.create_mem_cite = last_decl_line > k_info.init_cite ? last_decl_line : k_info.init_cite;
           k_info_queue.push_back(k_info);
 
           clean_kernel_info ();
@@ -494,10 +511,9 @@ public:
 
       unsigned i = Scope_stack.size();
       if (Scope_stack[i-2].type == 14) {
-        k_info.exit_loop = SM->getSpellingLineNumber(s->getLocEnd());
-        k_info.finish_cite = k_info.exit_loop;
+        k_info.exit_loop = SM->getExpansionLineNumber(s->getLocEnd());
 
-        k_info.replace_line = SM->getSpellingLineNumber(s->getLocStart());
+        k_info.replace_line = SM->getExpansionLineNumber(s->getLocStart());
 
 	BinaryOperator *cond = cast<BinaryOperator>(for_stmt->getCond());
 	Expr *rhs = cond->getRHS()->IgnoreImpCasts();
@@ -767,6 +783,7 @@ public:
     generator.set_exit_loop(k_info->exit_loop);
     generator.set_init_cite(k_info->init_cite);
     generator.set_finish_cite (k_info->finish_cite);
+    generator.set_create_mem_cite (k_info->create_mem_cite);
 
     struct var_decl var;
     var.type_name = "int";
