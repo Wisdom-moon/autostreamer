@@ -90,14 +90,14 @@ void kernel_heat_3d(int tsteps,
     exit(-1);
   }
 
-  (hStreams_app_create_buf((double (*)[120][120])A, (((_PB_N-1)-1)-(1) + 1)* sizeof (double [120][120])));
-  (hStreams_app_create_buf((double (*)[120][120])B, (((_PB_N-1)-1)-(1) + 1)* sizeof (double [120][120])));
+  (hStreams_app_create_buf((double (*)[120][120])A, (((_PB_N-1)-1)+ 1)* sizeof (double [120][120])));
+  (hStreams_app_create_buf((double (*)[120][120])B, (((_PB_N-1)-1)+ 1)* sizeof (double [120][120])));
   int t, i, j, k;
 
     for (t = 1; t <= TSTEPS; t++) {
-	(hStreams_app_xfer_memory((double (*)[120][120])A, (double (*)[120][120])A ,(((_PB_N-1)-1)-(1) + 1)* sizeof (double [120][120]), 0, HSTR_SRC_TO_SINK, NULL));
-	int sub_blocks = / 4;
-	int remain_index = % 4;
+	(hStreams_app_xfer_memory((double (*)[120][120])A, (double (*)[120][120])A ,(((_PB_N-1)-1)+ 1)* sizeof (double [120][120]), 0, HSTR_SRC_TO_SINK, NULL));
+	int sub_blocks = (((_PB_N-1)-1)-1 + 1)/ 4;
+	int remain_index = (((_PB_N-1)-1)-1 + 1)% 4;
 	int start_index = 0;
 	int end_index = 0;
 	uint64_t args[5];
@@ -105,22 +105,22 @@ void kernel_heat_3d(int tsteps,
 	args[3] = (uint64_t) B;
 	args[4] = (uint64_t) A;
 	hStreams_ThreadSynchronize();
-	start_index = 0;
-	for (int i = 0; i < 4; i++)
+	start_index = 1;
+	for (int idx_subtask = 0; idx_subtask < 4; idx_subtask++)
 	{
 	  args[0] = (uint64_t) start_index;
 	  end_index = start_index + sub_blocks;
-	  if (i < remain_index)
+	  if (idx_subtask < remain_index)
 	    end_index ++;
 	  args[1] = (uint64_t) end_index;
 	  (hStreams_EnqueueCompute(
-				i % 2,
+				idx_subtask % 2,
 				"kernel",
 				3,
 				2,
 				args,
 				NULL,NULL,0));
-	  (hStreams_app_xfer_memory(&B[start_index][0][0], &B[start_index][0][0], (end_index - start_index) * sizeof (double [120][120]), i % 2, HSTR_SINK_TO_SRC, NULL));
+	  (hStreams_app_xfer_memory(&B[start_index][0][0], &B[start_index][0][0], (end_index - start_index) * sizeof (double [120][120]), idx_subtask % 2, HSTR_SINK_TO_SRC, NULL));
 	  start_index = end_index;
 	}
 	hStreams_ThreadSynchronize();

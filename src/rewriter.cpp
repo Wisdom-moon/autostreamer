@@ -274,6 +274,7 @@ private:
     k_info.pointer_parms.clear();
     k_info.length_var.clear();
     k_info.local_parms.clear();
+    k_info.start_index.clear();
     k_info.loop_index = NULL;
     k_info.insns = 0;
   }
@@ -398,14 +399,12 @@ public:
 
 	      if (!cur_var.size_str.empty())
 	        new_mem.size_string = cur_var.size_str;
-	      else if (!cur_var.min_value.empty() && !cur_var.max_value.empty())
+	      //mem buf size only be decide by max_value.
+	      else if (!cur_var.max_value.empty())
 	      {
 	    	new_mem.size_string = "(";
 		new_mem.size_string += cur_var.max_value;
-		new_mem.size_string += "-";
-		new_mem.size_string += "(";
-		new_mem.size_string += cur_var.min_value;
-		new_mem.size_string += ") + 1)";
+		new_mem.size_string += "+ 1)";
 		new_mem.size_string += "* sizeof (";
 		new_mem.size_string += new_mem.elem_type;
 		new_mem.size_string += ")";
@@ -509,6 +508,7 @@ public:
 	}
       }
 
+      //Record subtask's index and its value range.
       unsigned i = Scope_stack.size();
       if (Scope_stack[i-2].type == 14) {
         k_info.exit_loop = SM->getExpansionLineNumber(s->getLocEnd());
@@ -521,10 +521,17 @@ public:
 	if (isa<DeclRefExpr>(lhs)) {
 	  DeclRefExpr *ref = cast<DeclRefExpr>(lhs);
 	  k_info.loop_index = ref->getDecl();
-	}
-	if (isa<DeclRefExpr>(rhs)) {
-	  DeclRefExpr *ref = cast<DeclRefExpr>(rhs);
-          k_info.length_var = ref->getDecl()->getName().str();
+
+	  //Because the loop index may not start with 0.
+	  struct var_data *cur_var;
+	  query_var (ref->getDecl()->getName().str(), &cur_var);
+          k_info.length_var = "(";
+          k_info.length_var += cur_var->max_value;
+          k_info.length_var += "-";
+          k_info.length_var += cur_var->min_value;
+          k_info.length_var += " + 1)";
+
+	  k_info.start_index = cur_var->min_value;
   	}
       }
     }
@@ -795,6 +802,7 @@ public:
     generator.add_kernel_arg(var);
 
     generator.set_length_var(k_info->length_var);
+    generator.set_start_index(k_info->start_index);
     generator.set_replace_line(k_info->replace_line);
 
     for (unsigned i = 0; i < k_info->val_parms.size(); i++)

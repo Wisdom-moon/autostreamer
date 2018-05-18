@@ -60,6 +60,7 @@ class WriteInFile {
   unsigned task_blocks;
   //The total task size.
   std::string length_var_name;
+  std::string start_index_str;
   //mem xfers that is before all kernel execution.
   std::vector<mem_xfer> pre_xfers;
   //all mem bufs that need be created.
@@ -103,6 +104,7 @@ class WriteInFile {
   void set_logical_streams(unsigned n);
   void set_task_blocks(unsigned n);
   void set_length_var(std::string name);
+  void set_start_index(std::string name);
   void add_mem_xfer(struct mem_xfer m);
   
 };

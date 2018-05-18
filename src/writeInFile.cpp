@@ -236,13 +236,14 @@ void WriteInFile::generateHostFile() {
     File <<Start<<"hStreams_ThreadSynchronize();\n";
 
     //Init start_index.
-    File <<Start<<"start_index = 0;\n";
+    File <<Start<<"start_index = "<<start_index_str<<";\n";
 
-    File <<Start<<"for (int i = 0; i < "<<task_blocks<<"; i++)\n"
+    //Use idx_subtask is to avoid be the same to original variable name
+    File <<Start<<"for (int idx_subtask = 0; idx_subtask < "<<task_blocks<<"; idx_subtask++)\n"
 	 <<Start<<"{\n"
 	 <<Start<<"  args[0] = (uint64_t) start_index;\n"
 	 <<Start<<"  end_index = start_index + sub_blocks;\n"
-	 <<Start<<"  if (i < remain_index)\n"
+	 <<Start<<"  if (idx_subtask < remain_index)\n"
 	 <<Start<<"    end_index ++;\n"
 	 <<Start<<"  args[1] = (uint64_t) end_index;\n";
     for (unsigned i = 0;i < h2d_xfers.size(); i++) {
@@ -254,11 +255,11 @@ void WriteInFile::generateHostFile() {
       for (unsigned j = 1; j < h2d_xfers[i].dim; j++)
 	File <<"[0]";
       File <<", (end_index - start_index) * sizeof ("<<h2d_xfers[i].elem_type<<"), "
-	   <<"i \% "<<logical_streams<<", HSTR_SRC_TO_SINK, NULL));\n";
+	   <<"idx_subtask \% "<<logical_streams<<", HSTR_SRC_TO_SINK, NULL));\n";
     }
 
     File <<Start<<"  (hStreams_EnqueueCompute(\n"
-	 <<Start<<"			i % "<<logical_streams<<",\n"
+	 <<Start<<"			idx_subtask % "<<logical_streams<<",\n"
 	 <<Start<<"			\""<<KernelName<<"\",\n"
 	 <<Start<<"			"<<val_num<<",\n"
 	 <<Start<<"			"<<pointer_num<<",\n"
@@ -274,7 +275,7 @@ void WriteInFile::generateHostFile() {
       for (unsigned j = 1; j < d2h_xfers[i].dim; j++)
 	File <<"[0]";
       File <<", (end_index - start_index) * sizeof ("<<d2h_xfers[i].elem_type<<"), "
-	   <<"i \% "<<logical_streams<<", HSTR_SINK_TO_SRC, NULL));\n";
+	   <<"idx_subtask \% "<<logical_streams<<", HSTR_SINK_TO_SRC, NULL));\n";
     }
 
     File <<Start<<"  start_index = end_index;\n"
@@ -420,6 +421,9 @@ void WriteInFile::set_task_blocks(unsigned n) {
 
 void WriteInFile::set_length_var(std::string name) {
   length_var_name = name;
+}
+void WriteInFile::set_start_index(std::string name) {
+  start_index_str = name;
 }
 
 void WriteInFile::add_mem_xfer(struct mem_xfer m) {

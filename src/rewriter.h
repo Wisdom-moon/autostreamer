@@ -67,6 +67,8 @@ struct Kernel_Info {
   ValueDecl * loop_index;
   //The compute instructions.
   unsigned int insns;
+  //The init value of loop index may not be 0!
+  std::string start_index;
 };
 
 struct Scope_data {
