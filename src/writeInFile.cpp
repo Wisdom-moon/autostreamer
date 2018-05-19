@@ -201,9 +201,9 @@ void WriteInFile::generateHostFile() {
     //Add hStreams mem transfer code
     for (unsigned i = 0;i < pre_xfers.size(); i++) {
       File <<Start<<"(hStreams_app_xfer_memory("
-	   <<"("<<mem_bufs[i].type_name<<")"
+	   <<"("<<pre_xfers[i].type_name<<")"
 	   <<pre_xfers[i].buf_name<<", "
-	   <<"("<<mem_bufs[i].type_name<<")"
+	   <<"("<<pre_xfers[i].type_name<<")"
 	   <<pre_xfers[i].buf_name<<" ,"
 	   <<pre_xfers[i].size_string<<", 0, HSTR_SRC_TO_SINK, NULL));\n";
     }
@@ -284,9 +284,9 @@ void WriteInFile::generateHostFile() {
     File<<Start<<"hStreams_ThreadSynchronize();\n";
     for (auto &mem_xfer : post_xfers) {
       File <<Start<<"  (hStreams_app_xfer_memory("
-	   <<"("<<mem_xfer.type_name<<"*)"
+	   <<"("<<mem_xfer.type_name<<")"
 	   <<mem_xfer.buf_name<<", "
-	   <<"("<<mem_xfer.type_name<<"*)"
+	   <<"("<<mem_xfer.type_name<<")"
 	   <<mem_xfer.buf_name<<" ,"
 	   <<mem_xfer.size_string<<", 0, HSTR_SINK_TO_SRC, NULL));\n";
     }
