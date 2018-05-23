@@ -41,26 +41,75 @@ private:
     return false;
   }
 
+  
+  //Handle DelcRef in index expr.
+  int analysis_declref (DeclRefExpr *ref, std::string &min, std::string &max) {
+    int ret = 3;
+    struct var_data *cur_var;
+    query_var (ref->getDecl()->getName().str(), &cur_var);
+    if (cur_var && cur_var->type == 1) {
+      if (!cur_var->min_value_str.empty())
+	  min += cur_var->min_value_str;
+      else
+          min += cur_var->name;
+      if (!cur_var->max_value_str.empty())
+          max += cur_var->max_value_str;
+      else
+          max += cur_var->name;
+    }
+
+    return ret;
+  }
+  //Handle ParenExpr in BinaryOperator.
+  int analysis_paren (Expr *idx, std::string &min, std::string &max) {
+    int ret = 0;
+    if (isa<ParenExpr> (idx)) {
+      Expr *e = cast<ParenExpr> (idx)->getSubExpr()->IgnoreImpCasts();
+      min += "(";
+      max += "(";
+      if (isa<BinaryOperator> (e)) {
+	ret = analysis_bin_op (cast<BinaryOperator> (e), min, max);
+      }
+      else if (isa <ParenExpr> (e)) {
+	ret = analysis_paren (e, min, max);
+      }
+      else if (isa <DeclRefExpr> (e)) {
+        DeclRefExpr *ref = cast<DeclRefExpr>(e);
+	ret = analysis_declref (ref, min, max);
+      }
+      else {
+        min += get_str(e);
+        max += get_str(e);
+      }
+      min += ")";
+      max += ")";
+    }
+    return ret;
+  }
   //Analysis binary operator, give its min value and max value.
-  void analysis_bin_op (BinaryOperator *op, std::string &min, std::string &max) {
+  int analysis_bin_op (BinaryOperator *op, std::string &min, std::string &max) {
+
+    int ret = 0;
+    int l_ret = 0;
+    int r_ret = 0;
 
     Expr *lhs = op->getLHS()->IgnoreImpCasts();
     if (isa<BinaryOperator> (lhs))
-      analysis_bin_op (cast<BinaryOperator>(lhs), min, max);
+      l_ret = analysis_bin_op (cast<BinaryOperator>(lhs), min, max);
     else if (isa<DeclRefExpr> (lhs)){
       DeclRefExpr *ref = cast<DeclRefExpr>(lhs);
-      struct var_data *cur_var;
-      query_var (ref->getDecl()->getName().str(), &cur_var);
-      if (cur_var && cur_var->type == 1) {
-        if (!cur_var->min_value.empty())
-	  min += cur_var->min_value;
-	else
-	  min += cur_var->name;
-	if (!cur_var->max_value.empty())
-	  max += cur_var->max_value;
-	else
-	  max += cur_var->name;
-      }
+      l_ret = analysis_declref (ref, min, max);
+    }
+    else if (isa<ParenExpr> (lhs)) {
+      l_ret = analysis_paren(lhs, min, max);
+    }
+    else if (isa<IntegerLiteral> (lhs)) {
+      IntegerLiteral * int_lit = cast<IntegerLiteral>(lhs);
+      llvm::APInt int_val = int_lit->getValue();
+      int * p_val = (int *)int_val.getRawData();
+      l_ret = *p_val;
+      min += std::to_string (l_ret);
+      max += std::to_string (l_ret);
     }
     else {
       min += get_str(lhs);
@@ -73,62 +122,92 @@ private:
 
     Expr *rhs = op->getRHS()->IgnoreImpCasts();
     if (isa<BinaryOperator> (rhs))
-      analysis_bin_op (cast<BinaryOperator>(rhs), min, max);
+      r_ret = analysis_bin_op (cast<BinaryOperator>(rhs), min, max);
     else if (isa<DeclRefExpr> (rhs)){
       DeclRefExpr *ref = cast<DeclRefExpr>(rhs);
-      struct var_data *cur_var;
-      query_var (ref->getDecl()->getName().str(), &cur_var);
-      if (cur_var && cur_var->type == 1) {
-        if (!cur_var->min_value.empty())
-	  min += cur_var->min_value;
-	else
-	  min += cur_var->name;
-	if (!cur_var->max_value.empty())
-	  max += cur_var->max_value;
-	else
-	  max += cur_var->name;
-      }
+      r_ret = analysis_declref (ref, min, max);
+    }
+    else if (isa<ParenExpr> (rhs)) {
+      r_ret = analysis_paren(rhs, min, max);
+    }
+    else if (isa<IntegerLiteral> (rhs)) {
+      IntegerLiteral * int_lit = cast<IntegerLiteral>(rhs);
+      llvm::APInt int_val = int_lit->getValue();
+      int * p_val = (int *)int_val.getRawData();
+      r_ret = *p_val;
+      min += std::to_string (r_ret);
+      max += std::to_string (r_ret);
     }
     else {
       min += get_str(rhs);
       max += get_str(rhs);
     }
+
+    switch (op->getOpcode ()) {
+      case BO_Mul:
+	ret = l_ret * r_ret;
+	break;
+      case BO_Add:
+	ret = l_ret + r_ret;
+	break;
+      case BO_Sub:
+	ret = l_ret - r_ret;
+	break;
+      default:
+	break;
+    }
+
+    return ret;
   }
 
   //Analysis Expr vector(arry's 1st dim index), return its min value and max value.
   //Because the type of mult-array is a pointer that point to 
   //(dim -1) mult-array
-  void analysis_index (Expr * idx, std::string &min, std::string &max) {
+  int analysis_index (Expr * idx, std::string &min, std::string &max) {
+    int ret = 0;
     if (idx == NULL)
-      return ;
+      return ret;
 
     min.clear();
     max.clear();
 
     if (isa<BinaryOperator>(idx)) {
-      analysis_bin_op (cast<BinaryOperator>(idx), min, max);
+      ret = analysis_bin_op (cast<BinaryOperator>(idx), min, max);
     }
     else if (isa<DeclRefExpr> (idx)){
       DeclRefExpr *ref = cast<DeclRefExpr>(idx);
-      struct var_data *cur_var;
-      query_var (ref->getDecl()->getName().str(), &cur_var);
-      if (cur_var && cur_var->type == 1) {
-        if (!cur_var->min_value.empty())
-	  min = cur_var->min_value;
-	else
-	  min = cur_var->name;
-	if (!cur_var->max_value.empty())
-	  max = cur_var->max_value;
-	else
-	  max = cur_var->name;
-        }
+      ret = analysis_declref (ref, min, max);
       }
+    else if (isa<ParenExpr> (idx)) {
+      ParenExpr * paren = cast<ParenExpr> (idx);
+      ret = analysis_paren (paren, min, max);
+    }
     else {
       min = get_str(idx);
       max = get_str(idx);
     }
 
-    return ;
+    return ret;
+  }
+  void evalue_index (Expr *idx, struct var_data *cur_var) {
+    std::string min;
+    std::string max;
+    int value = analysis_index (idx, min, max);
+
+    if (cur_var->IdxChains.size() == 1) {
+      cur_var->value_min = value;
+      cur_var->value_max = value;
+      cur_var->max_value_str = max;
+      cur_var->min_value_str = min;
+    }
+    else if (value > cur_var->value_max) {
+      cur_var->value_max = value;
+      cur_var->max_value_str = max;
+    }
+    else if (value < cur_var->value_min) {
+      cur_var->value_min = value;
+      cur_var->min_value_str = min;
+    }
   }
 
   //Analysis ArraySubscriptExpr, maybe mult dim array.
@@ -400,10 +479,10 @@ public:
 	      if (!cur_var.size_str.empty())
 	        new_mem.size_string = cur_var.size_str;
 	      //mem buf size only be decide by max_value.
-	      else if (!cur_var.max_value.empty())
+	      else if (!cur_var.max_value_str.empty())
 	      {
 	    	new_mem.size_string = "(";
-		new_mem.size_string += cur_var.max_value;
+		new_mem.size_string += cur_var.max_value_str;
 		new_mem.size_string += "+ 1)";
 		new_mem.size_string += "* sizeof (";
 		new_mem.size_string += new_mem.elem_type;
@@ -482,7 +561,7 @@ public:
 	  VarDecl *var = cast<VarDecl>(cast<DeclStmt>(init)->getSingleDecl());
 	  Expr * init_val = var->getInit();
           struct var_data * init_var = Insert_var_data(var, Scope_stack.back());
-	  init_var->min_value = get_str(init_val);
+	  init_var->min_value_str = get_str(init_val);
       }
       else if (isa<BinaryOperator>(init)) {
         BinaryOperator * op = cast<BinaryOperator>(init);
@@ -491,7 +570,7 @@ public:
 	  struct var_data *init_var;
 	  DeclRefExpr *ref = cast<DeclRefExpr>(lhs);
 	  query_var (ref->getDecl()->getName().str(), &init_var);
-	  init_var->min_value = get_str(op->getRHS()->IgnoreImpCasts());
+	  init_var->min_value_str = get_str(op->getRHS()->IgnoreImpCasts());
 	}
       }
 
@@ -502,9 +581,9 @@ public:
 	DeclRefExpr *ref = cast<DeclRefExpr>(lhs);
 	query_var (ref->getDecl()->getName().str(), &init_var);
 	if (cond->getOpcode() == BO_LT) {
-	  init_var->max_value = "((";
-	  init_var->max_value += get_str(cond->getRHS()->IgnoreImpCasts());
-	  init_var->max_value += ")-1)";
+	  init_var->max_value_str = "((";
+	  init_var->max_value_str += get_str(cond->getRHS()->IgnoreImpCasts());
+	  init_var->max_value_str += ")-1)";
 	}
       }
 
@@ -526,12 +605,12 @@ public:
 	  struct var_data *cur_var;
 	  query_var (ref->getDecl()->getName().str(), &cur_var);
           k_info.length_var = "(";
-          k_info.length_var += cur_var->max_value;
+          k_info.length_var += cur_var->max_value_str;
           k_info.length_var += "-";
-          k_info.length_var += cur_var->min_value;
+          k_info.length_var += cur_var->min_value_str;
           k_info.length_var += " + 1)";
 
-	  k_info.start_index = cur_var->min_value;
+	  k_info.start_index = cur_var->min_value_str;
   	}
       }
     }
@@ -641,7 +720,7 @@ public:
 	if (( kind == 0 || kind == 2)  && !lhs.empty()) {
           unsigned out_kernel = query_var (lhs, &cur_var);//1 means out of kernel.
 	  cur_var->IdxChains.push_back(lhs_idx);
-	  analysis_index (lhs_idx[0], cur_var->min_value, cur_var->max_value);
+	  evalue_index (lhs_idx[0], cur_var);
           if (cur_var && out_kernel == 1) {
 	    if (cur_var->usedByKernel < 2)
 	      cur_var->usedByKernel += 2;
@@ -651,7 +730,7 @@ public:
  	if ( kind == 0 && !rhs.empty()) {
           unsigned out_kernel = query_var (rhs, &cur_var);//1 means out of kernel.
 	  cur_var->IdxChains.push_back(rhs_idx);
-	  analysis_index (rhs_idx[0], cur_var->min_value, cur_var->max_value);
+	  evalue_index (rhs_idx[0], cur_var);
           if (cur_var && out_kernel == 1) {
 	    if (cur_var->usedByKernel == 0 || cur_var->usedByKernel == 2)
 	      cur_var->usedByKernel ++;
@@ -663,7 +742,7 @@ public:
 	  if (!lhs.empty()) {
             unsigned out_kernel = query_var (lhs, &cur_var);//1 means out of kernel.
 	    cur_var->IdxChains.push_back(lhs_idx);
-	    analysis_index (lhs_idx[0], cur_var->min_value, cur_var->max_value);
+	    evalue_index (lhs_idx[0], cur_var);
             if (out_kernel == 1) {
 	      if (cur_var->usedByKernel == 0 || cur_var->usedByKernel == 2)
 	        cur_var->usedByKernel ++;
@@ -672,7 +751,7 @@ public:
 	  if (!rhs.empty()) {
             unsigned out_kernel = query_var (rhs, &cur_var);//1 means out of kernel.
 	    cur_var->IdxChains.push_back(rhs_idx);
-	    analysis_index (rhs_idx[0], cur_var->min_value, cur_var->max_value);
+	    evalue_index (rhs_idx[0], cur_var);
             if (cur_var && out_kernel == 1) {
 	      if (cur_var->usedByKernel == 0 || cur_var->usedByKernel == 2)
 	        cur_var->usedByKernel ++;
@@ -700,7 +779,7 @@ public:
 	  struct var_data * cur_var;
           unsigned out_kernel = query_var (base_name, &cur_var);//1 means out of kernel.
 	  cur_var->IdxChains.push_back(idx_arry);
-	  analysis_index (idx_arry[0], cur_var->min_value, cur_var->max_value);
+	  evalue_index (idx_arry[0], cur_var);
           if (cur_var && out_kernel == 1) {
 	    if (cur_var->usedByKernel == 0 || cur_var->usedByKernel == 2)
 	      cur_var->usedByKernel ++;

@@ -85,19 +85,23 @@ while (!Infile.eof()) {
 	decl_str.insert(idx+1, arg_decls[i].var_name);
       }
 
-      std::string::size_type t_idx = decl_str.find("double");
+      std::string type_str = arg_decls[i].type_name;
+      std::string::size_type t_idx = type_str.find("const");
+      if (t_idx != std::string::npos)
+        type_str.erase (t_idx, 5);
+      t_idx = type_str.find("double");
       if (t_idx == std::string::npos)
-        t_idx = decl_str.find("float");
+        t_idx = type_str.find("float");
       //Handle double/float scalar parameters, its conversion expression
       //should be like this: TYPE a = *((TYPE *) (&arg));
       if (idx == std::string::npos && t_idx != std::string::npos) {
         File <<"  "<<decl_str
-	  <<" = *((" <<arg_decls[i].type_name
+	  <<" = *((" <<type_str
 	  <<" *) (&arg" <<arg_decls[i].id <<"));\n";
       }
       else {
         File <<"  "<<decl_str
-	  <<" = (" <<arg_decls[i].type_name
+	  <<" = (" <<type_str
 	  <<") arg" <<arg_decls[i].id <<";\n";
       }
     }

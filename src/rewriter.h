@@ -36,9 +36,9 @@ struct var_data {
   unsigned int type;
   //For pointer, min_value is index's min value
   //For non-pointer, min_value is variable's min value
-  std::string min_value;
+  std::string min_value_str;
   //max_value is assemble to min_value;
-  std::string max_value;
+  std::string max_value_str;
   //0: not used in kernel; 1: read only in kernel; 
   //2: write only in kernel; 3:r+w in kernel;
   //This attr is only used by pointer.
@@ -46,6 +46,9 @@ struct var_data {
   bool isKernelArg;
   //For memory access in kernel, its Index expr chain.
   std::vector<std::vector<Expr *>> IdxChains;
+  //Set all variables = 1, compute the value of index.
+  int value_min;
+  int value_max;
   //Its declare stmt.
   Decl * decl_stmt;
 };
