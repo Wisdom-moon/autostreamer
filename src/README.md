@@ -12,3 +12,6 @@ Need to do:
   Analysis array's indexes, to find the overlap.
   Array that is assigned value at the begin of kernel, no need to transfer h2d. The problem is we need to make sure all element used later is assigned value in kernel!
   Analysis where the array is used after kernel, can push the transferment from dev to host later.
+  Two or more level index, can not infer the size of array.
+  Optimization for redundant memory transfer.
+  Optimization for memory access.
