@@ -294,6 +294,8 @@ void WriteInFile::generateHostFile() {
 	   <<mem_xfer.buf_name<<" ,"
 	   <<mem_xfer.size_string<<", 0, HSTR_SINK_TO_SRC, NULL));\n";
     }
+    if (post_xfers.size() > 0)
+      File<<Start<<"hStreams_ThreadSynchronize();\n";
 
     LineNo++;
     continue;

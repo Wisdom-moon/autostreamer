@@ -15,3 +15,6 @@ Need to do:
   Two or more level index, can not infer the size of array.
   Optimization for redundant memory transfer.
   Optimization for memory access.
+  When evaluate index, it is calculated with a statement, it is hard to known whether wo should replace the vars in that statement with its evaluated value. The situation is too complex!
+  Eliminate redundant parentheses.
+  Can not know which variable is bigger in different indices.

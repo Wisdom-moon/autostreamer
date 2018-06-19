@@ -561,16 +561,17 @@ public:
 	  VarDecl *var = cast<VarDecl>(cast<DeclStmt>(init)->getSingleDecl());
 	  Expr * init_val = var->getInit();
           struct var_data * init_var = Insert_var_data(var, Scope_stack.back());
-	  init_var->min_value_str = get_str(init_val);
+	  analysis_index (init_val, init_var->min_value_str, init_var->max_value_str);
       }
       else if (isa<BinaryOperator>(init)) {
         BinaryOperator * op = cast<BinaryOperator>(init);
-	Expr *lhs = op->getLHS()->IgnoreImpCasts();
+	Expr * lhs= op->getLHS()->IgnoreImpCasts();
 	if (isa<DeclRefExpr>(lhs)) {
 	  struct var_data *init_var;
 	  DeclRefExpr *ref = cast<DeclRefExpr>(lhs);
 	  query_var (ref->getDecl()->getName().str(), &init_var);
-	  init_var->min_value_str = get_str(op->getRHS()->IgnoreImpCasts());
+	  analysis_index (op->getRHS()->IgnoreImpCasts(), init_var->min_value_str, 
+				init_var->max_value_str);
 	}
       }
 
@@ -580,10 +581,31 @@ public:
 	struct var_data *init_var;
 	DeclRefExpr *ref = cast<DeclRefExpr>(lhs);
 	query_var (ref->getDecl()->getName().str(), &init_var);
-	if (cond->getOpcode() == BO_LT) {
-	  init_var->max_value_str = "((";
-	  init_var->max_value_str += get_str(cond->getRHS()->IgnoreImpCasts());
-	  init_var->max_value_str += ")-1)";
+	std::string rhs_min, rhs_max;
+	analysis_index (cond->getRHS()->IgnoreImpCasts(), rhs_min, rhs_max);
+	switch (cond->getOpcode()) {
+	  case BO_LT:
+	    init_var->max_value_str = "((";
+	    init_var->max_value_str += rhs_max;
+	    init_var->max_value_str += ")-1)";
+	    break;
+	  case BO_LE:
+	    init_var->max_value_str = "(";
+	    init_var->max_value_str += rhs_max;
+	    init_var->max_value_str += ")";
+	    break;
+	  case BO_GT:
+	    init_var->min_value_str = "((";
+	    init_var->min_value_str += rhs_min;
+	    init_var->min_value_str += ")-1)";
+	    break;
+	  case BO_GE:
+	    init_var->min_value_str = "(";
+	    init_var->min_value_str += rhs_min;
+	    init_var->min_value_str += ")";
+	    break;
+	  default:
+	    break;
 	}
       }
 

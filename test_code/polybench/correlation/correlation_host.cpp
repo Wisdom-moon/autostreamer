@@ -73,6 +73,30 @@ void kernel_correlation(int m, int n,
 			DATA_TYPE POLYBENCH_1D(mean,M,m),
 			DATA_TYPE POLYBENCH_1D(stddev,M,m))
 {
+  uint32_t logical_streams_per_place= 1;
+  uint32_t places_per_domain = 2;
+  HSTR_OPTIONS hstreams_options;
+
+  hStreams_GetCurrentOptions(&hstreams_options, sizeof(hstreams_options));
+  hstreams_options.verbose = 0;
+  hstreams_options.phys_domains_limit = 256;
+  char *libNames[20] = {NULL,NULL};
+  unsigned int libNameCnt = 0;
+  libNames[libNameCnt++] = "kernel.so";
+  hstreams_options.libNames = libNames;
+  hstreams_options.libNameCnt = (uint16_t)libNameCnt;
+  hStreams_SetOptions(&hstreams_options);
+
+  int iret = hStreams_app_init(places_per_domain, logical_streams_per_place);
+  if( iret != 0 )
+  {
+    printf("hstreams_app_init failed!\n");
+    exit(-1);
+  }
+
+  (hStreams_app_create_buf((double (*)[1200])data, (((n)-1)+ 1)* sizeof (double [1200])));
+  (hStreams_app_create_buf((double *)mean, (((m)-1)+ 1)* sizeof (double )));
+  (hStreams_app_create_buf((double *)stddev, (((m)-1)+ 1)* sizeof (double )));
   int i, j, k;
 
   DATA_TYPE eps = SCALAR_VAL(0.1);
@@ -87,33 +111,9 @@ void kernel_correlation(int m, int n,
     }
 
 
-uint32_t logical_streams_per_place= 1;
-uint32_t places_per_domain = 2;
-HSTR_OPTIONS hstreams_options;
-
-hStreams_GetCurrentOptions(&hstreams_options, sizeof(hstreams_options));
-hstreams_options.verbose = 0;
-hstreams_options.phys_domains_limit = 256;
-char *libNames[20] = {NULL,NULL};
-unsigned int libNameCnt = 0;
-libNames[libNameCnt++] = "kernel.so";
-hstreams_options.libNames = libNames;
-hstreams_options.libNameCnt = (uint16_t)libNameCnt;
-hStreams_SetOptions(&hstreams_options);
-
-int iret = hStreams_app_init(places_per_domain, logical_streams_per_place);
-if( iret != 0 )
-{
-  printf("hstreams_app_init failed!\n");
-  exit(-1);
-}
-
-(hStreams_app_create_buf((double (*)[1200])data, (((n)-1)-(0) + 1)* sizeof (double [1200])));
-(hStreams_app_create_buf((double *)mean, (((m)-1)-(0) + 1)* sizeof (double )));
-(hStreams_app_create_buf((double *)stddev, (((m)-1)-(0) + 1)* sizeof (double )));
-(hStreams_app_xfer_memory((double (*)[1200])data, (double (*)[1200])data ,(((n)-1)-(0) + 1)* sizeof (double [1200]), 0, HSTR_SRC_TO_SINK, NULL));
-int sub_blocks = m/ 4;
-int remain_index = m% 4;
+(hStreams_app_xfer_memory((double (*)[1200])data, (double (*)[1200])data ,(((n)-1)+ 1)* sizeof (double [1200]), 0, HSTR_SRC_TO_SINK, NULL));
+int sub_blocks = (((m)-1)-0 + 1)/ 4;
+int remain_index = (((m)-1)-0 + 1)% 4;
 int start_index = 0;
 int end_index = 0;
 uint64_t args[9];
@@ -126,27 +126,26 @@ args[7] = (uint64_t) data;
 args[8] = (uint64_t) mean;
 hStreams_ThreadSynchronize();
 start_index = 0;
-for (int i = 0; i < 4; i++)
+for (int idx_subtask = 0; idx_subtask < 4; idx_subtask++)
 {
   args[0] = (uint64_t) start_index;
   end_index = start_index + sub_blocks;
-  if (i < remain_index)
+  if (idx_subtask < remain_index)
     end_index ++;
   args[1] = (uint64_t) end_index;
-  (hStreams_app_xfer_memory(&mean[start_index], &mean[start_index], (end_index - start_index) * sizeof (double ), i % 2, HSTR_SRC_TO_SINK, NULL));
-  (hStreams_app_xfer_memory(&stddev[start_index], &stddev[start_index], (end_index - start_index) * sizeof (double ), i % 2, HSTR_SRC_TO_SINK, NULL));
+  (hStreams_app_xfer_memory(&mean[start_index], &mean[start_index], (end_index - start_index) * sizeof (double ), idx_subtask % 2, HSTR_SRC_TO_SINK, NULL));
+  (hStreams_app_xfer_memory(&stddev[start_index], &stddev[start_index], (end_index - start_index) * sizeof (double ), idx_subtask % 2, HSTR_SRC_TO_SINK, NULL));
   (hStreams_EnqueueCompute(
-			i % 2,
+			idx_subtask % 2,
 			"kernel",
 			6,
 			3,
 			args,
 			NULL,NULL,0));
-  (hStreams_app_xfer_memory(&stddev[start_index], &stddev[start_index], (end_index - start_index) * sizeof (double ), i % 2, HSTR_SINK_TO_SRC, NULL));
+  (hStreams_app_xfer_memory(&stddev[start_index], &stddev[start_index], (end_index - start_index) * sizeof (double ), idx_subtask % 2, HSTR_SINK_TO_SRC, NULL));
   start_index = end_index;
 }
-    hStreams_ThreadSynchronize();
-    hStreams_app_fini();
+hStreams_ThreadSynchronize();
 
   /* Center and reduce the column vectors. */
   for (i = 0; i < _PB_N; i++)
@@ -170,6 +169,7 @@ for (int i = 0; i < 4; i++)
     }
   corr[_PB_M-1][_PB_M-1] = SCALAR_VAL(1.0);
 
+hStreams_app_fini();
 }
 
 
