@@ -255,6 +255,13 @@ private:
       if (cur_var && cur_var->type == 0)
         rhs = ref->getDecl()->getName().str();
     }
+    else if (isa<MemberExpr>(op->getRHS()->IgnoreImpCasts())) {
+      MemberExpr * member = cast<MemberExpr>(op->getRHS()->IgnoreImpCasts());
+      if (isa<ArraySubscriptExpr>(member->getBase())) {
+        ArraySubscriptExpr * arr = cast<ArraySubscriptExpr>(member->getBase());
+        analysis_array (arr, rhs, rhs_idx);
+      }
+    }
 
     if (isa<ArraySubscriptExpr>(op->getLHS()->IgnoreImpCasts())) {
       ArraySubscriptExpr * arr = cast<ArraySubscriptExpr>(op->getLHS()->IgnoreImpCasts());
@@ -266,6 +273,13 @@ private:
       query_var (ref->getDecl()->getName().str(), &cur_var);
       if (cur_var && cur_var->type == 0)
         lhs = ref->getDecl()->getName().str();
+    }
+    else if (isa<MemberExpr>(op->getLHS()->IgnoreImpCasts())) {
+      MemberExpr * member = cast<MemberExpr>(op->getLHS()->IgnoreImpCasts());
+      if (isa<ArraySubscriptExpr>(member->getBase())) {
+        ArraySubscriptExpr * arr = cast<ArraySubscriptExpr>(member->getBase());
+        analysis_array (arr, lhs, lhs_idx);
+      }
     }
 
     return ret;
