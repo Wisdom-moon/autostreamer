@@ -19,7 +19,6 @@ int main(int argc, char *argv[]) {
   hostInput2 = (float *)malloc(inputLengthBytes);
   hostOutput       = (float *)malloc(inputLengthBytes);
 
-//#pragma omp parallel for
   for(int i=0; i<inputLength; i++)
   {
     hostInput1[i] = (float)(i % 11);

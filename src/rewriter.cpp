@@ -6,7 +6,7 @@
 //------------------------------------------------------------------------------
 #include "rewriter.h"
 
-#define DEBUG_INFO
+//#define DEBUG_INFO
 
 static llvm::cl::OptionCategory ToolingSampleCategory("Tooling Sample");
 
