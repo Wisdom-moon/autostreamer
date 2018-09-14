@@ -46,7 +46,7 @@ struct var_data {
   bool isKernelArg;
   //For memory access in kernel, its Index expr chain.
   std::vector<std::vector<Expr *>> IdxChains;
-  //Set all variables = 1, compute the value of index.
+  //Set all variables = 3, compute the value of index.
   int value_min;
   int value_max;
   //Its declare stmt.

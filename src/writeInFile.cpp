@@ -4,7 +4,7 @@
 // This file is distributed under the Universidade Federal de Minas Gerais -
 // UFMG Open Source License. See LICENSE.TXT for details.
 //
-// Copyright (C) 2018  Peng Zhang 
+// Copyright (C) 2018  Peng Zhang (pengzhang_nudt@sina.com)
 //
 //===----------------------------------------------------------------------===//
 //

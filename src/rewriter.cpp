@@ -47,6 +47,8 @@ private:
     int ret = 3;
     struct var_data *cur_var;
     query_var (ref->getDecl()->getName().str(), &cur_var);
+
+    //cur_var->type == 1 means cur_var is non-pointer variable.
     if (cur_var && cur_var->type == 1) {
       if (!cur_var->min_value_str.empty())
 	  min += cur_var->min_value_str;
