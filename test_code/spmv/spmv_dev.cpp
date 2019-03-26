@@ -15,22 +15,21 @@ kernel ( uint64_t arg0,
 	uint64_t arg6,
 	uint64_t arg7,
 	uint64_t arg8,
-	uint64_t arg9,
-	uint64_t arg10
+	uint64_t arg9
 )
 {
 
   int start_index = (int) arg0;
   int end_index = (int) arg1;
-  int i = (int) arg2;
-  int dim = (int) arg3;
-  int * h_nzcnt = (int *) arg4;
-  int * h_ptr = (int *) arg5;
-  int * h_indices = (int *) arg6;
-  float * h_data = (float *) arg7;
-  float * h_x_vector = (float *) arg8;
-  float * h_Ax_vector = (float *) arg9;
-  int * h_perm = (int *) arg10;
+  int dim = (int) arg2;
+  int *h_nzcnt = (int *) arg3;
+  int *h_ptr = (int *) arg4;
+  int *h_indices = (int *) arg5;
+  float *h_data = (float *) arg6;
+  float *h_x_vector = (float *) arg7;
+  float *h_Ax_vector = (float *) arg8;
+  int *h_perm = (int *) arg9;
+  int i;
     #pragma omp parallel for
 		for (i = start_index; i < end_index; i++) {
       int k;

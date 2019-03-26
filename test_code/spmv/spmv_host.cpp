@@ -51,6 +51,27 @@ void jdsmv(int height, int len, float* value, int* perm, int* jds_ptr, int* col_
 }
 */
 int main(int argc, char** argv) {
+	uint32_t logical_streams_per_place= 1;
+	uint32_t places_per_domain = 2;
+	HSTR_OPTIONS hstreams_options;
+
+	hStreams_GetCurrentOptions(&hstreams_options, sizeof(hstreams_options));
+	hstreams_options.verbose = 0;
+	hstreams_options.phys_domains_limit = 256;
+	char *libNames[20] = {NULL,NULL};
+	unsigned int libNameCnt = 0;
+	libNames[libNameCnt++] = "kernel.so";
+	hstreams_options.libNames = libNames;
+	hstreams_options.libNameCnt = (uint16_t)libNameCnt;
+	hStreams_SetOptions(&hstreams_options);
+
+	int iret = hStreams_app_init(places_per_domain, logical_streams_per_place);
+	if( iret != 0 )
+	{
+	  printf("hstreams_app_init failed!\n");
+	  exit(-1);
+	}
+
 	struct pb_TimerSet timers;
 	struct pb_Parameters *parameters;
 	
@@ -88,6 +109,12 @@ int main(int argc, char** argv) {
 	int *h_nzcnt;
 	//vector
 	float *h_Ax_vector;
+    (hStreams_app_create_buf((float *)h_Ax_vector, (sizeof(float)*d)));
+    (hStreams_app_create_buf((float *)h_data, (j+ 1)* sizeof (float )));
+    (hStreams_app_create_buf((int *)h_indices, (j+ 1)* sizeof (int )));
+    (hStreams_app_create_buf((int *)h_nzcnt, (((dim)-1)+ 1)* sizeof (int )));
+    (hStreams_app_create_buf((int *)h_ptr, (((bound)-1)+ 1)* sizeof (int )));
+    (hStreams_app_create_buf((float *)h_x_vector, (sizeof(float)*d)));
     float *h_x_vector;
 	
 	
@@ -125,77 +152,44 @@ int main(int argc, char** argv) {
 	//main execution
 	for(p=0;p<50;p++)
 	{
-    uint32_t logical_streams_per_place= 1;
-    uint32_t places_per_domain = 2;
-    HSTR_OPTIONS hstreams_options;
-
-    hStreams_GetCurrentOptions(&hstreams_options, sizeof(hstreams_options));
-    hstreams_options.verbose = 0;
-    hstreams_options.phys_domains_limit = 256;
-    char *libNames[20] = {NULL,NULL};
-    unsigned int libNameCnt = 0;
-    libNames[libNameCnt++] = "kernel.so";
-    hstreams_options.libNames = libNames;
-    hstreams_options.libNameCnt = (uint16_t)libNameCnt;
-    hStreams_SetOptions(&hstreams_options);
-
-    int iret = hStreams_app_init(places_per_domain, logical_streams_per_place);
-    if( iret != 0 )
-    {
-      printf("hstreams_app_init failed!\n");
-      exit(-1);
-    }
-
-    CHECK_HSTR_RESULT(hStreams_app_create_buf(h_Ax_vector, (sizeof(float)*d)));
-    CHECK_HSTR_RESULT(hStreams_app_create_buf(h_data, ));
-    CHECK_HSTR_RESULT(hStreams_app_create_buf(h_indices, ));
-    CHECK_HSTR_RESULT(hStreams_app_create_buf(h_nzcnt, ));
-    CHECK_HSTR_RESULT(hStreams_app_create_buf(h_ptr, ));
-    CHECK_HSTR_RESULT(hStreams_app_create_buf(h_x_vector, (sizeof(float)*d)));
-    CHECK_HSTR_RESULT(hStreams_app_xfer_memory(h_data, h_data ,, 0, HSTR_SRC_TO_SINK, NULL));
-    CHECK_HSTR_RESULT(hStreams_app_xfer_memory(h_indices, h_indices ,, 0, HSTR_SRC_TO_SINK, NULL));
-    CHECK_HSTR_RESULT(hStreams_app_xfer_memory(h_ptr, h_ptr ,, 0, HSTR_SRC_TO_SINK, NULL));
-    CHECK_HSTR_RESULT(hStreams_app_xfer_memory(h_x_vector, h_x_vector ,(sizeof(float)*d), 0, HSTR_SRC_TO_SINK, NULL));
-    int sub_blocks = dim/ 4;
-    int remain_index = dim% 4;
+    (hStreams_app_xfer_memory((float *)h_data, (float *)h_data ,(j+ 1)* sizeof (float ), 0, HSTR_SRC_TO_SINK, NULL));
+    (hStreams_app_xfer_memory((int *)h_indices, (int *)h_indices ,(j+ 1)* sizeof (int ), 0, HSTR_SRC_TO_SINK, NULL));
+    (hStreams_app_xfer_memory((int *)h_ptr, (int *)h_ptr ,(((bound)-1)+ 1)* sizeof (int ), 0, HSTR_SRC_TO_SINK, NULL));
+    (hStreams_app_xfer_memory((float *)h_x_vector, (float *)h_x_vector ,(sizeof(float)*d), 0, HSTR_SRC_TO_SINK, NULL));
+    int sub_blocks = (((dim)-1)-0 + 1)/ 4;
+    int remain_index = (((dim)-1)-0 + 1)% 4;
     int start_index = 0;
     int end_index = 0;
-    uint64_t args[11];
-    args[2] = (uint64_t) i;
-    args[3] = (uint64_t) dim;
-    args[4] = (uint64_t) h_nzcnt;
-    args[5] = (uint64_t) h_ptr;
-    args[6] = (uint64_t) h_indices;
-    args[7] = (uint64_t) h_data;
-    args[8] = (uint64_t) h_x_vector;
-    args[9] = (uint64_t) h_Ax_vector;
-    args[10] = (uint64_t) h_perm;
+    uint64_t args[10];
+    args[2] = (uint64_t) dim;
+    args[3] = (uint64_t) h_nzcnt;
+    args[4] = (uint64_t) h_ptr;
+    args[5] = (uint64_t) h_indices;
+    args[6] = (uint64_t) h_data;
+    args[7] = (uint64_t) h_x_vector;
+    args[8] = (uint64_t) h_Ax_vector;
+    args[9] = (uint64_t) h_perm;
     hStreams_ThreadSynchronize();
     start_index = 0;
-    for (int i = 0; i < 4; i++)
+    for (int idx_subtask = 0; idx_subtask < 4; idx_subtask++)
     {
       args[0] = (uint64_t) start_index;
       end_index = start_index + sub_blocks;
-      if (i < remain_index)
+      if (idx_subtask < remain_index)
         end_index ++;
       args[1] = (uint64_t) end_index;
-      CHECK_HSTR_RESULT(hStreams_app_xfer_memory(&h_nzcnt[start_index], &h_nzcnt[start_index], (end_index - start_index) * sizeof (int ), i % 2, HSTR_SRC_TO_SINK, NULL));
-      CHECK_HSTR_RESULT(hStreams_EnqueueCompute(
-    			i % 2,
+      (hStreams_app_xfer_memory(&h_nzcnt[start_index], &h_nzcnt[start_index], (end_index - start_index) * sizeof (int ), idx_subtask % 2, HSTR_SRC_TO_SINK, NULL));
+      (hStreams_EnqueueCompute(
+    			idx_subtask % 2,
     			"kernel",
-    			4,
+    			3,
     			7,
     			args,
     			NULL,NULL,0));
+      (hStreams_app_xfer_memory(&h_Ax_vector[start_index], &h_Ax_vector[start_index], (end_index - start_index) * sizeof (float ), idx_subtask % 2, HSTR_SINK_TO_SRC, NULL));
       start_index = end_index;
     }
-		hStreams_ThreadSynchronize();
-		CHECK_HSTR_RESULT(hStreams_app_xfer_memory(h_data, h_data ,, 0, HSTR_SRC_TO_SINK, NULL));
-		CHECK_HSTR_RESULT(hStreams_app_xfer_memory(h_indices, h_indices ,, 0, HSTR_SRC_TO_SINK, NULL));
-		CHECK_HSTR_RESULT(hStreams_app_xfer_memory(h_ptr, h_ptr ,, 0, HSTR_SRC_TO_SINK, NULL));
-		CHECK_HSTR_RESULT(hStreams_app_xfer_memory(h_x_vector, h_x_vector ,(sizeof(float)*d), 0, HSTR_SRC_TO_SINK, NULL));
-		  CHECK_HSTR_RESULT(hStreams_app_xfer_memory(h_Ax_vector, h_Ax_vector ,(sizeof(float)*d), 0, , HSTR_SINK_TO_SRC, NULL));
-		hStreams_app_fini();
+    hStreams_ThreadSynchronize();
 	}	
 
 	if (parameters->outFile) {
@@ -219,5 +213,6 @@ int main(int argc, char** argv) {
 
 	return 0;
 
+hStreams_app_fini();
 }
 
