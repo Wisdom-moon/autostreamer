@@ -480,7 +480,7 @@ while (!Infile.eof()) {
       loop_var = Line.substr(init_end + 1, cond_begin - init_end - 2);
     }
 
-    File << "{\n";
+    File << "\n";
   }
   else if (is_include (Line) || in_loop(LineNo)) {
     File << Line << "\n";
@@ -528,7 +528,7 @@ while (!Infile.eof()) {
     else
       File <<loop_var<<" = get_global_id(0);\n";
 
-    File << Line <<"\n";
+    File <<"\n";
   }
   if (exit_loop == LineNo) {
     File << Line <<"\n}";
