@@ -59,6 +59,7 @@ class WriteInFile {
   unsigned logical_streams;
   unsigned task_blocks;
   //The total task size.
+  std::string loop_var;
   std::string length_var_name;
   std::string start_index_str;
   //mem xfers that is before all kernel execution.
@@ -104,9 +105,12 @@ class WriteInFile {
   void set_logical_streams(unsigned n);
   void set_task_blocks(unsigned n);
   void set_length_var(std::string name);
+  void set_loop_var(std::string name);
   void set_start_index(std::string name);
   void add_mem_xfer(struct mem_xfer m);
   
+  void generateOCLDevFile ();
+  void generateOCLHostFile ();
 };
 
 //===------------------------ writeInFIle.h --------------------------===//

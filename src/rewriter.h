@@ -65,6 +65,7 @@ struct Kernel_Info {
   std::vector<var_decl> pointer_parms;
   std::vector<var_decl> local_parms;
   std::string length_var;
+  std::string loop_var;
 
   //The omp parallel for iteration index variable declaration
   ValueDecl * loop_index;

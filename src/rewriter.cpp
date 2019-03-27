@@ -7,6 +7,7 @@
 #include "rewriter.h"
 
 //#define DEBUG_INFO
+#define GEN_OCL
 
 static llvm::cl::OptionCategory ToolingSampleCategory("Tooling Sample");
 
@@ -368,6 +369,7 @@ private:
     k_info.val_parms.clear();
     k_info.pointer_parms.clear();
     k_info.length_var.clear();
+    k_info.loop_var.clear();
     k_info.local_parms.clear();
     k_info.start_index.clear();
     k_info.loop_index = NULL;
@@ -649,6 +651,7 @@ public:
           k_info.length_var += " + 1)";
 
 	  k_info.start_index = cur_var->min_value_str;
+	  k_info.loop_var = ref->getDecl()->getName().str();
   	}
       }
     }
@@ -920,6 +923,7 @@ public:
     generator.set_create_mem_cite (k_info->create_mem_cite);
 
     struct var_decl var;
+#ifndef GEN_OCL
     var.type_name = "int";
     var.var_name = "start_index";
     var.type = 2;
@@ -927,8 +931,10 @@ public:
 
     var.var_name = "end_index";
     generator.add_kernel_arg(var);
+#endif
 
     generator.set_length_var(k_info->length_var);
+    generator.set_loop_var(k_info->loop_var);
     generator.set_start_index(k_info->start_index);
     generator.set_replace_line(k_info->replace_line);
 
@@ -952,8 +958,17 @@ public:
     generator.set_logical_streams (2);
     generator.set_task_blocks (4);
 
+#ifndef GEN_OCL
+    //Generate hStreams Code by default
     generator.generateDevFile();
     generator.generateHostFile();
+#endif
+
+    //Generate OpenCL Code
+#ifdef GEN_OCL
+    generator.generateOCLDevFile();
+    generator.generateOCLHostFile();
+#endif
   }
 
   std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI,

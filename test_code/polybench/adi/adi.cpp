@@ -94,7 +94,6 @@ void kernel_adi(int tsteps, int n,
 
  for (t=1; t<=_PB_TSTEPS; t++) {
     //Column Sweep
-#pragma omp parallel for private (i, j, c, d, b, a)
     for (i=1; i<_PB_N-1; i++) {
       v[0][i] = SCALAR_VAL(1.0);
       p[i][0] = SCALAR_VAL(0.0);
@@ -110,6 +109,7 @@ void kernel_adi(int tsteps, int n,
       }
     }
     //Row Sweep
+#pragma omp parallel for private (i, j, e, d, c, a)
     for (i=1; i<_PB_N-1; i++) {
       u[i][0] = SCALAR_VAL(1.0);
       p[i][0] = SCALAR_VAL(0.0);

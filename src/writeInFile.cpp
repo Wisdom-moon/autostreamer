@@ -428,6 +428,9 @@ void WriteInFile::set_task_blocks(unsigned n) {
 void WriteInFile::set_length_var(std::string name) {
   length_var_name = name;
 }
+void WriteInFile::set_loop_var(std::string name) {
+  loop_var = name;
+}
 void WriteInFile::set_start_index(std::string name) {
   start_index_str = name;
 }
@@ -445,6 +448,258 @@ void WriteInFile::add_mem_xfer(struct mem_xfer m) {
   else if (m.type & 4) 
     d2h_xfers.push_back (m);
 }
+void WriteInFile::generateOCLDevFile() {
+  if (enter_loop <= 0)
+  return;
 
+fstream Infile(InputFile.c_str());
+if (!Infile){
+  cerr << "\nError. File " << InputFile << " has not found.\n";
+  return;
+}
+std::string Line = std::string();
+ofstream File("kernel.cl");
+cerr << "\nWriting output to dev file " << DevFile<< "\n";
+
+unsigned LineNo = 1;
+while (!Infile.eof()) {
+  Line = std::string();
+  std::getline(Infile, Line);
+
+  if (replace_line == LineNo) {
+    std::string::size_type start_i = Line.find("for");
+    if (start_i != std::string::npos) {
+      std::string::size_type init_begin, init_end, cond_begin, cond_end;
+      init_begin = Line.find("=", start_i) + 1;
+      init_end = Line.find(";", init_begin);
+      cond_begin = Line.find("<", init_end) + 1;
+      cond_end = Line.find(";", cond_begin);
+
+      Line.replace(cond_begin, cond_end - cond_begin, " end_index");
+      Line.replace(init_begin, init_end - init_begin, " start_index");
+      loop_var = Line.substr(init_end + 1, cond_begin - init_end - 2);
+    }
+
+    File << "{\n";
+  }
+  else if (is_include (Line) || in_loop(LineNo)) {
+    File << Line << "\n";
+  }
+  if (enter_loop == LineNo) {
+    //Add arguments decl.
+    std::string parameters_str;
+    for (unsigned i = 0; i < arg_decls.size(); i++) {
+      if ( i > 0)
+	parameters_str += ",\n\t";
+      std::string decl_str = arg_decls[i].type_name;
+      std::string::size_type idx = decl_str.find("*");
+      if (idx == std::string::npos) {
+        decl_str += " ";
+	decl_str += arg_decls[i].var_name;
+      }
+      else {
+        //Handle for mult-dim array, its decl should be TYPE (*name)[nn]
+	decl_str.insert(idx+1, arg_decls[i].var_name);
+	parameters_str += "__global ";
+      }
+      std::string::size_type t_idx = decl_str.find("const");
+      if (t_idx != std::string::npos)
+        decl_str.erase (t_idx, 5);
+      parameters_str += decl_str;
+    }
+    
+
+    //Add kernel function decl.
+    File << "__kernel void my_kernel\n"
+	 <<" ( "<<parameters_str;
+    File <<")\n{\n\n";
+
+    //Add local variables decl.
+    int is_def = 0;
+    for (unsigned i = 0; i < var_decls.size(); i++) {
+      File <<"  "<<var_decls[i].type_name
+	<<" "<<var_decls[i].var_name<<";\n";
+      if (var_decls[i].var_name == loop_var)
+	is_def = 1;
+    }
+
+    if (is_def == 0)
+      File << "int "<<loop_var<<" = get_global_id(0);\n";
+    else
+      File <<loop_var<<" = get_global_id(0);\n";
+
+    File << Line <<"\n";
+  }
+  if (exit_loop == LineNo) {
+    File << Line <<"\n}";
+  }
+
+  LineNo++;
+}
+
+File.close();
+}
+
+void WriteInFile::generateOCLHostFile() {
+  if (enter_loop <= 0)
+  return;
+
+  fstream Infile(InputFile.c_str());
+  if (!Infile){
+    cerr << "\nError. File " << InputFile << " has not found.\n";
+    return;
+  }
+  std::string Line = std::string();
+  ofstream File(HostFile.c_str());
+  cerr << "\nWriting output to host file " << HostFile<< "\n";
+
+  //Add hStreams include file;
+  File << "#include <set_env.h>\n";
+
+  unsigned LineNo = 1;
+  while (!Infile.eof()) {
+    Line = std::string();
+    std::getline(Infile, Line);
+
+  if (init_cite == LineNo) {
+    std::string Start;
+    for (std::string::iterator It = Line.begin(), E = Line.end(); It != E;
+	++ It) {
+      if (*It == ' ' || *It == '\t') {
+	Start += *It;
+      }
+      else
+	break;
+    }
+    //Add hStreams init code
+    File <<Start<<"read_cl_file();\n"
+         <<Start<<"cl_initialization();\n"
+	 <<Start<<"cl_load_prog();\n\n";
+  }
+  if (create_mem_cite == LineNo) {
+    std::string Start;
+    for (std::string::iterator It = Line.begin(), E = Line.end(); It != E;
+	++ It) {
+      if (*It == ' ' || *It == '\t') {
+	Start += *It;
+      }
+      else
+	break;
+    }
+    //Add hStreams buf create code
+    for (unsigned i = 0; i < mem_bufs.size(); i++) {
+      File <<Start<<"cl_mem "<<mem_bufs[i].buf_name<<"_mem_obj = "
+	   <<"clCreateBuffer(clGPUContext, CL_MEM_READ_WRITE, "
+	   <<mem_bufs[i].size_string<<", NULL, NULL);\n";
+    }
+  }
+  if (enter_loop == LineNo) {
+    std::string Start;
+    for (std::string::iterator It = Line.begin(), E = Line.end(); It != E;
+	++ It) {
+      if (*It == ' ' || *It == '\t') {
+	Start += *It;
+      }
+      else
+	break;
+    }
+    //Add OpenCL mem transfer code
+    for (unsigned i = 0;i < pre_xfers.size(); i++) {
+      File <<Start<<"errcode = clEnqueueWriteBuffer(clCommandQue[0], "
+	   <<pre_xfers[i].buf_name<<"_mem_obj, CL_TRUE, 0,\n"
+	   <<Start<<pre_xfers[i].size_string<<", \n"
+	   <<Start<<pre_xfers[i].buf_name<<", 0, NULL, NULL);\n";
+    }
+
+    //Add hStreams multStreams variables decl
+    File <<Start<<"size_t localThreads[1] = {8};\n";
+
+    //Add hStreams kernel arguments set code
+    for (unsigned i = 0; i < fix_decls.size(); i++) {
+      std::string::size_type idx = fix_decls[i].type_name.find("*");
+
+      File <<Start<<"clSetKernelArg(clKernel, "
+  	   <<fix_decls[i].id<<", ";
+      if (idx != std::string::npos)
+        File <<"sizeof(cl_mem), (void *) &"<<fix_decls[i].var_name<<"_mem_obj);\n";
+      else
+        File <<"sizeof("<<fix_decls[i].type_name<<"), &"<<fix_decls[i].var_name<<");\n";
+    }
+
+    //Use idx_subtask is to avoid be the same to original variable name
+    File <<Start<<"for (int i = 0; i < tasks; i++)\n"
+	 <<Start<<"{\n"
+	 <<Start<<"  size_t globalOffset[1] = {i*"<<length_var_name<<"/tasks+"<<start_index_str<<"};\n"
+	 <<Start<<"  size_t globalThreads[1] = {"<<length_var_name<<"/tasks"<<"};\n";
+
+    for (unsigned i = 0;i < h2d_xfers.size(); i++) {
+      File <<Start<<"  clEnqueueWriteBuffer(clCommandQue[i], "
+	   <<h2d_xfers[i].buf_name<<"_mem_obj, CL_FALSE, i*"
+	   <<h2d_xfers[i].size_string<<"/tasks, "
+	   <<h2d_xfers[i].size_string<<"/tasks, "
+	   <<"&"<<h2d_xfers[i].buf_name<<"[i*"<<length_var_name<<"/tasks]";
+      for (unsigned j = 1; j < h2d_xfers[i].dim; j++)
+	File <<"[0]";
+      File <<", 0, NULL, NULL);\n";
+    }
+
+    File <<Start<<"  clEnqueueNDRangeKernel(clCommandQue[i], clKernel, 1, globalOffset, globalThreads, localThreads, 0, NULL, NULL);\n";
+
+    for (unsigned i = 0;i < d2h_xfers.size(); i++) {
+      File <<Start<<"  clEnqueueReadBuffer(clCommandQue[i], "
+	   <<d2h_xfers[i].buf_name<<"_mem_obj, CL_FALSE, i*"
+	   <<d2h_xfers[i].size_string<<"/tasks, "
+	   <<d2h_xfers[i].size_string<<"/tasks, "
+	   <<"&"<<d2h_xfers[i].buf_name<<"[i*"<<length_var_name<<"/tasks]";
+      for (unsigned j = 1; j < d2h_xfers[i].dim; j++)
+	File <<"[0]";
+      File <<", 0, NULL, NULL);\n";
+    }
+    File <<Start<<"}\n";
+
+    File <<Start<<"for (int i = 0; i < tasks; i++)\n"
+    	 <<Start<<"  clFinish(clCommandQue[i]);\n";
+    for (auto &mem_xfer : post_xfers) {
+      File <<Start<<"errcode = clEnqueueReadBuffer(clCommandQue[0], "
+	   <<mem_xfer.buf_name<<"_mem_obj, CL_TRUE, 0,\n"
+	   <<Start<<mem_xfer.size_string<<", \n"
+	   <<Start<<mem_xfer.buf_name<<", 0, NULL, NULL);\n";
+    }
+    if (post_xfers.size() > 0)
+      File<<Start<<"clFinish(clCommandQue[0]);\n";
+
+    LineNo++;
+    continue;
+  }
+  if (in_loop(LineNo)) {
+    LineNo++;
+    continue;
+  }
+  if (finish_cite == LineNo) {
+    std::string Start;
+    for (std::string::iterator It = Line.begin(), E = Line.end(); It != E;
+	++ It) {
+      if (*It == ' ' || *It == '\t') {
+	Start += *It;
+      }
+      else
+	break;
+    }
+
+    for (unsigned i = 0; i < mem_bufs.size(); i++)
+      File <<Start<<"clReleaseMemObject("<<mem_bufs[i].buf_name<<"_mem_obj);\n";
+    File<<Start<<"cl_clean_up();\n";
+  }
+  if (exit_loop == LineNo) {
+    LineNo++;
+    continue;
+  }
+
+  File << Line <<"\n";
+  LineNo++;
+  }
+
+  File.close();
+}
 //===-------------------------- writeInFile.cpp --------------------------===//
 
