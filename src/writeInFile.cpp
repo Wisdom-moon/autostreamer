@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 #include <fstream>
 #include <iostream>
+#include <sstream>
 
 
 #include "writeInFile.h" 
@@ -145,7 +146,7 @@ void WriteInFile::generateHostFile() {
     Line = std::string();
     std::getline(Infile, Line);
 
-  if (init_cite == LineNo) {
+  if (init_site == LineNo) {
     std::string Start;
     for (std::string::iterator It = Line.begin(), E = Line.end(); It != E;
 	++ It) {
@@ -175,7 +176,7 @@ void WriteInFile::generateHostFile() {
 	 <<Start<<"  exit(-1);\n"
 	 <<Start<<"}\n\n";
   }
-  if (create_mem_cite == LineNo) {
+  if (create_mem_site == LineNo) {
     std::string Start;
     for (std::string::iterator It = Line.begin(), E = Line.end(); It != E;
 	++ It) {
@@ -304,7 +305,7 @@ void WriteInFile::generateHostFile() {
     LineNo++;
     continue;
   }
-  if (finish_cite == LineNo) {
+  if (finish_site == LineNo) {
     std::string Start;
     for (std::string::iterator It = Line.begin(), E = Line.end(); It != E;
 	++ It) {
@@ -338,8 +339,8 @@ WriteInFile::WriteInFile() {
   replace_line = 0;
   enter_loop = 0;
   exit_loop = 0;
-  init_cite = 0;
-  finish_cite = 0;
+  init_site = 0;
+  finish_site = 0;
 }
 
 WriteInFile::~WriteInFile() {
@@ -383,15 +384,15 @@ void WriteInFile::set_exit_loop(unsigned LineNo) {
   exit_loop = LineNo;
 }
 
-void WriteInFile::set_init_cite(unsigned LineNo) {
-  init_cite = LineNo;
+void WriteInFile::set_init_site(unsigned LineNo) {
+  init_site = LineNo;
 }
 
-void WriteInFile::set_finish_cite(unsigned LineNo) {
-  finish_cite = LineNo;
+void WriteInFile::set_finish_site(unsigned LineNo) {
+  finish_site = LineNo;
 }
-void WriteInFile::set_create_mem_cite(unsigned LineNo) {
-  create_mem_cite = LineNo;
+void WriteInFile::set_create_mem_site(unsigned LineNo) {
+  create_mem_site = LineNo;
 }
 
 void WriteInFile::add_kernel_arg(struct var_decl var) {
@@ -423,6 +424,13 @@ void WriteInFile::set_logical_streams(unsigned n) {
 
 void WriteInFile::set_task_blocks(unsigned n) {
   task_blocks = n;
+}
+
+void WriteInFile::set_include_site (unsigned n){
+  include_insert_site = n;
+}
+void WriteInFile::set_cuda_site (unsigned n){
+  cuda_kernel_site = n;
 }
 
 void WriteInFile::set_length_var(std::string name) {
@@ -561,7 +569,7 @@ void WriteInFile::generateOCLHostFile() {
     Line = std::string();
     std::getline(Infile, Line);
 
-  if (init_cite == LineNo) {
+  if (init_site == LineNo) {
     std::string Start;
     for (std::string::iterator It = Line.begin(), E = Line.end(); It != E;
 	++ It) {
@@ -576,7 +584,7 @@ void WriteInFile::generateOCLHostFile() {
          <<Start<<"cl_initialization();\n"
 	 <<Start<<"cl_load_prog();\n\n";
   }
-  if (create_mem_cite == LineNo) {
+  if (create_mem_site == LineNo) {
     std::string Start;
     for (std::string::iterator It = Line.begin(), E = Line.end(); It != E;
 	++ It) {
@@ -675,7 +683,7 @@ void WriteInFile::generateOCLHostFile() {
     LineNo++;
     continue;
   }
-  if (finish_cite == LineNo) {
+  if (finish_site == LineNo) {
     std::string Start;
     for (std::string::iterator It = Line.begin(), E = Line.end(); It != E;
 	++ It) {
@@ -689,6 +697,266 @@ void WriteInFile::generateOCLHostFile() {
     for (unsigned i = 0; i < mem_bufs.size(); i++)
       File <<Start<<"clReleaseMemObject("<<mem_bufs[i].buf_name<<"_mem_obj);\n";
     File<<Start<<"cl_clean_up();\n";
+  }
+  if (exit_loop == LineNo) {
+    LineNo++;
+    continue;
+  }
+
+  File << Line <<"\n";
+  LineNo++;
+  }
+
+  File.close();
+}
+
+std::string WriteInFile::generateCUKernelCode() {
+
+  ostringstream File("");
+  if (enter_loop <= 0)
+  return File.str();
+
+fstream Infile(InputFile.c_str());
+if (!Infile){
+  cerr << "\nError. File " << InputFile << " has not found.\n";
+  return File.str();
+}
+std::string Line = std::string();
+
+unsigned LineNo = 1;
+while (!Infile.eof()) {
+  Line = std::string();
+  std::getline(Infile, Line);
+
+  if (replace_line == LineNo) {
+    std::string::size_type start_i = Line.find("for");
+    if (start_i != std::string::npos) {
+      std::string::size_type init_begin, init_end, cond_begin, cond_end;
+      init_begin = Line.find("=", start_i) + 1;
+      init_end = Line.find(";", init_begin);
+      cond_begin = Line.find("<", init_end) + 1;
+      cond_end = Line.find(";", cond_begin);
+
+      Line.replace(cond_begin, cond_end - cond_begin, " end_index");
+      Line.replace(init_begin, init_end - init_begin, " start_index");
+      loop_var = Line.substr(init_end + 1, cond_begin - init_end - 2);
+    }
+    File << "\n";
+  }
+  else if (in_loop(LineNo)) {
+    File << Line << "\n";
+  }
+  if (enter_loop == LineNo) {
+    //Add arguments decl.
+    std::string parameters_str;
+    for (unsigned i = 0; i < fix_decls.size(); i++) {
+      if ( i > 0)
+	parameters_str += ", ";
+      std::string decl_str = fix_decls[i].type_name;
+      decl_str += " ";
+      decl_str += fix_decls[i].var_name;
+      parameters_str += decl_str;
+    }
+    parameters_str += ", int length";
+
+    //Add kernel function decl.
+    File << "__global__ void my_kernel\n"
+	 <<" ( "<<parameters_str;
+    File <<")\n{\n\n";
+
+    //Add local variables decl.
+    int is_def = 0;
+    for (unsigned i = 0; i < var_decls.size(); i++) {
+      File <<"  "<<var_decls[i].type_name
+	<<" "<<var_decls[i].var_name<<";\n";
+      if (var_decls[i].var_name == loop_var)
+	is_def = 1;
+    }
+
+    if (is_def == 0)
+      File << "int "<<loop_var<<" = blockDim.x * blockIdx.x + threadIdx.x;\n";
+    else
+      File <<loop_var<<" = blockDim.x * blockIdx.x + threadIdx.x;\n";
+
+    File <<"if ("<<loop_var<<" >= length"<<")\n"
+	 << "  return;\n";
+  }
+  if (exit_loop == LineNo) {
+    File << Line <<"\n}\n\n";
+  }
+
+  LineNo++;
+}
+
+return File.str();
+}
+
+void WriteInFile::generateCUDAFile() {
+  if (enter_loop <= 0)
+  return;
+
+  std::string kernel_code = generateCUKernelCode();
+
+  fstream Infile(InputFile.c_str());
+  if (!Infile){
+    cerr << "\nError. File " << InputFile << " has not found.\n";
+    return;
+  }
+  std::string Line = std::string();
+  std::string::size_type idx = HostFile.find(".");
+  if (idx != std::string::npos)
+    HostFile.erase(idx, 5);
+  HostFile += ".cu";
+  ofstream File(HostFile.c_str());
+  cerr << "\nWriting output to CUDA file " << HostFile<< "\n";
+
+  unsigned LineNo = 1;
+  while (!Infile.eof()) {
+    Line = std::string();
+    std::getline(Infile, Line);
+
+  //Add CUDA include file;
+  if (LineNo == include_insert_site) {
+    File << "#include <cuda.h>\n";
+    File << "#include <cuda_runtime_api.h>\n\n\n";
+  }
+  if (LineNo == cuda_kernel_site) {
+    File << kernel_code;
+  }
+
+  if (init_site == LineNo) {
+    std::string Start;
+    for (std::string::iterator It = Line.begin(), E = Line.end(); It != E;
+	++ It) {
+      if (*It == ' ' || *It == '\t') {
+	Start += *It;
+      }
+      else
+	break;
+    }
+    //Add hStreams init code
+    File <<Start<<"int nstreams = 2;\n"
+         <<Start<<"cudaSetDevice(0);\n"
+         <<Start<<"cudaSetDeviceFlags(cudaDeviceBlockingSync);\n"
+	 <<Start<<"cudaStream_t *streams = (cudaStream_t*) malloc(nstreams*sizeof(cudaStream_t));\n"
+         <<Start<<"for (int i = 0; i < nstreams; i++) {\n"
+         <<Start<<"  cudaStreamCreate(&(streams[i]));\n"
+         <<Start<<"}\n\n"
+	 <<Start<<"cudaEvent_t start_event, stop_event;\n"
+	 <<Start<<"int eventflags = cudaEventBlockingSync;\n"
+	 <<Start<<"cudaEventCreateWithFlags(&start_event, eventflags);\n"
+	 <<Start<<"cudaEventCreateWithFlags(&stop_event, eventflags);\n";
+  }
+  if (create_mem_site == LineNo) {
+    std::string Start;
+    for (std::string::iterator It = Line.begin(), E = Line.end(); It != E;
+	++ It) {
+      if (*It == ' ' || *It == '\t') {
+	Start += *It;
+      }
+      else
+	break;
+    }
+    //Add hStreams buf create code
+    for (unsigned i = 0; i < mem_bufs.size(); i++) {
+      File <<Start<<mem_bufs[i].type_name<<" d_"<<mem_bufs[i].buf_name<<";\n"
+	   <<Start<<"cudaMalloc((void **)&d_"<<mem_bufs[i].buf_name<<", "
+	   <<mem_bufs[i].size_string<<");\n";
+    }
+  }
+  if (enter_loop == LineNo) {
+    std::string Start;
+    for (std::string::iterator It = Line.begin(), E = Line.end(); It != E;
+	++ It) {
+      if (*It == ' ' || *It == '\t') {
+	Start += *It;
+      }
+      else
+	break;
+    }
+    //Add OpenCL mem transfer code
+    for (unsigned i = 0;i < pre_xfers.size(); i++) {
+      File <<Start<<"cudaMemcpyAsync(d_"
+	   <<pre_xfers[i].buf_name<<", "<<pre_xfers[i].buf_name<<", "
+	   <<Start<<pre_xfers[i].size_string<<", cudaMemcpyHostToDevice, streams[0]);\n";
+    }
+
+    //Add hStreams multStreams variables decl
+    File <<Start<<"int threadsPerBlock = 256;\n";
+
+    //Add hStreams kernel arguments set code
+    ostringstream parameters_os;
+    for (unsigned i = 0; i < fix_decls.size(); i++) {
+      if ( i > 0)
+	parameters_os << ", ";
+
+      std::string::size_type idx = fix_decls[i].type_name.find("*");
+
+      if (idx != std::string::npos)
+        parameters_os << "d_"<<fix_decls[i].var_name<<"+i*"<<length_var_name<<"/nstreams";
+      else
+        parameters_os <<fix_decls[i].var_name;
+    }
+    parameters_os << ", "<<length_var_name<<"/nstreams";
+
+    //Use idx_subtask is to avoid be the same to original variable name
+    File <<Start<<"for (int i = 0; i < nstreams; i++)\n"
+	 <<Start<<"{\n"
+	 <<Start<<"int blocksPerGrid = ("<<length_var_name<<"+threadsPerBlock - 1)/(nstreams*threadsPerBlock);\n";
+
+    for (unsigned i = 0;i < h2d_xfers.size(); i++) {
+      File <<Start<<"  cudaMemcpyAsync(d_"
+	   <<h2d_xfers[i].buf_name<<"+i*"<<length_var_name<<"/nstreams, "
+	   <<h2d_xfers[i].buf_name<<"+i*"<<length_var_name<<"/nstreams, "
+	   <<h2d_xfers[i].size_string<<"/nstreams, cudaMemcpyHostToDevice, streams[i]);\n";
+    }
+
+    File <<Start<<"  my_kernel<<<blocksPerGrid, threadsPerBlock,0, streams[i]>>>("<<parameters_os.str()<<");\n";
+
+    for (unsigned i = 0;i < d2h_xfers.size(); i++) {
+      File <<Start<<"  cudaMemcpyAsync("
+	   <<d2h_xfers[i].buf_name<<"+i*"<<length_var_name<<"/nstreams, "
+	   <<"d_"<<d2h_xfers[i].buf_name<<"+i*"<<length_var_name<<"/nstreams, "
+	   <<d2h_xfers[i].size_string<<"/nstreams, cudaMemcpyDeviceToHost, streams[i]);\n";
+    }
+    File <<Start<<"}\n";
+
+    File <<Start<<"cudaEventRecord(stop_event, 0);\ncudaEventSynchronize(stop_event);\n";
+
+    for (auto &mem_xfer : post_xfers) {
+      File <<Start<<"cudaMemcpyAsync("
+	   <<mem_xfer.buf_name<<", d_"
+	   <<mem_xfer.buf_name<<", "
+	   <<mem_xfer.size_string<<",cudaMemcpyDeviceToHost, streams[0];\n";
+    }
+    if (post_xfers.size() > 0)
+      File <<Start<<"cudaEventRecord(stop_event, 0);\ncudaEventSynchronize(stop_event);\n";
+
+    LineNo++;
+    continue;
+  }
+  if (in_loop(LineNo)) {
+    LineNo++;
+    continue;
+  }
+  if (finish_site == LineNo) {
+    std::string Start;
+    for (std::string::iterator It = Line.begin(), E = Line.end(); It != E;
+	++ It) {
+      if (*It == ' ' || *It == '\t') {
+	Start += *It;
+      }
+      else
+	break;
+    }
+    File<<Start<<"for (int i = 0; i < nstreams; i++) {\n"
+	<<Start<<"  cudaStreamDestroy(streams[i]);\n"
+	<<Start<<"}\n"
+	<<Start<<"cudaEventDestroy(start_event);\n"
+	<<Start<<"cudaEventDestroy(stop_event);\n";
+    for (unsigned i = 0; i < mem_bufs.size(); i++)
+      File <<Start<<"cudaFree(d_"<<mem_bufs[i].buf_name<<");\n";
+    File<<Start<<"cudaDeviceReset();\n";
   }
   if (exit_loop == LineNo) {
     LineNo++;

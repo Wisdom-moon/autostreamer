@@ -76,15 +76,18 @@ class WriteInFile {
   unsigned replace_line;
   unsigned enter_loop;
   unsigned exit_loop;
-  unsigned init_cite;
-  unsigned finish_cite;
-  unsigned create_mem_cite;
+  unsigned init_site;
+  unsigned finish_site;
+  unsigned create_mem_site;
 
+  unsigned include_insert_site;
+  unsigned cuda_kernel_site;
   //===---------------------------------------------------------------------===
   //                           Utility functions 
   //===---------------------------------------------------------------------===
   bool is_include (std::string line);
   bool in_loop (unsigned LineNo);
+  std::string generateCUKernelCode();
 
   public:
 
@@ -96,9 +99,9 @@ class WriteInFile {
   void set_InputFile(std::string input);
   void set_enter_loop (unsigned LineNo);
   void set_exit_loop (unsigned LineNo);
-  void set_init_cite (unsigned LineNo);
-  void set_finish_cite (unsigned LineNo);
-  void set_create_mem_cite (unsigned LineNo);
+  void set_init_site (unsigned LineNo);
+  void set_finish_site (unsigned LineNo);
+  void set_create_mem_site (unsigned LineNo);
   void add_kernel_arg(struct var_decl var);
   void add_local_var(struct var_decl var);
   void set_replace_line(unsigned n);
@@ -108,9 +111,13 @@ class WriteInFile {
   void set_loop_var(std::string name);
   void set_start_index(std::string name);
   void add_mem_xfer(struct mem_xfer m);
+  void set_include_site (unsigned LineNo);
+  void set_cuda_site (unsigned LineNo);
   
   void generateOCLDevFile ();
   void generateOCLHostFile ();
+
+  void generateCUDAFile ();
 };
 
 //===------------------------ writeInFIle.h --------------------------===//

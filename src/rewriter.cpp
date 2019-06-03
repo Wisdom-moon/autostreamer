@@ -7,12 +7,19 @@
 #include "rewriter.h"
 
 //#define DEBUG_INFO
-#define GEN_OCL
+#define GEN_CUDA
+//#define GEN_OCL
 
 static llvm::cl::OptionCategory ToolingSampleCategory("Tooling Sample");
 
 // By implementing RecursiveASTVisitor, we can specify which AST nodes
 // we're interested in by overriding relevant methods.
+
+struct File_info {
+  int last_include = 0;
+  int start_function = 0;
+  int return_site = 0;
+} f_info;
 
 
 class MyASTVisitor : public RecursiveASTVisitor<MyASTVisitor> {
@@ -324,7 +331,7 @@ private:
       *var = &((*(Scope_stack[size - level - 1].var_table.find(name))).second);
     }
 
-    if (process_state != 1)
+    if (Scope_stack.back().process_state != 1)
       ret = 1;
 
     return ret;
@@ -361,9 +368,9 @@ private:
   void clean_kernel_info () {
     k_info.enter_loop = 0;
     k_info.exit_loop = 0;
-    k_info.init_cite = 0;
-    k_info.finish_cite = 0;
-    k_info.create_mem_cite = 0;
+    k_info.init_site = 0;
+    k_info.finish_site = 0;
+    k_info.create_mem_site = 0;
     k_info.replace_line = 0;
     k_info.mem_bufs.clear();
     k_info.val_parms.clear();
@@ -379,7 +386,6 @@ private:
 
 public:
   MyASTVisitor(std::vector<struct Kernel_Info> &k, std::vector<struct Scope_data> &s_stack): k_info_queue(k), Scope_stack(s_stack)  {
-    process_state = 0;
     clean_kernel_info ();
   }
   void Initialize(ASTContext &Context) {
@@ -398,6 +404,10 @@ public:
       new_scope.scol = SM->getExpansionColumnNumber(st->getLocStart());
       new_scope.eline = SM->getExpansionLineNumber(st->getLocEnd());
       new_scope.ecol = SM->getExpansionColumnNumber(st->getLocEnd());
+      new_scope.process_state = cur_scope.process_state;
+
+    if (SM->isWrittenInMainFile(st->getLocStart()) && f_info.last_include < 0)
+      f_info.last_include = SM->getExpansionLineNumber(st->getLocStart());
 
     if (isa<CompoundStmt>(st) || isa<WhileStmt>(st) || isa<CXXCatchStmt>(st)
        || isa<CXXForRangeStmt>(st) || isa<CXXTryStmt>(st) || isa<DoStmt>(st)
@@ -409,9 +419,10 @@ public:
 	CompoundStmt *c_st = cast<CompoundStmt>(st);
 	if (cur_scope.p_func) {
 	  new_scope.type = 1;
-          k_info.init_cite = SM->getExpansionLineNumber(
+	  new_scope.process_state = 0;
+          k_info.init_site = SM->getExpansionLineNumber(
 					c_st->body_front()->getLocStart());
-          k_info.finish_cite = SM->getExpansionLineNumber(
+          k_info.finish_site = SM->getExpansionLineNumber(
                                         c_st->getLocEnd());
 	  //Add ParmVarDecl to new_scope.var_table
 	  if (SM->isWrittenInMainFile (cur_scope.p_func->getLocation())) {
@@ -447,7 +458,7 @@ public:
       else if (isa<CapturedStmt>(st)) {
 	new_scope.type = 14;
         if (cur_scope.type == 13)
-	  process_state = 1;
+	  new_scope.process_state = 1;
       }
 
       Scope_stack.push_back(new_scope);
@@ -472,9 +483,14 @@ public:
        || isa<SwitchCase>(st) || isa<SwitchStmt>(st) || isa<WhileStmt>(st)
        || isa<CapturedStmt>(st)) {
 
+      struct Scope_data &pre_scope = Scope_stack.back();
       Scope_stack.pop_back();
+      struct Scope_data &cur_scope = Scope_stack.back();
+      if (pre_scope.type != 1)
+        cur_scope.process_state = pre_scope.process_state;
+
       if (isa<CapturedStmt>(st)) {
-	if (Scope_stack.back().type == 13) {
+	if (cur_scope.type == 13) {
           //Add mem_xfer to kernel_info here.
 	  struct mem_xfer new_mem;
 	  unsigned last_decl_line = 0;
@@ -549,25 +565,32 @@ public:
 	    cur_var.IdxChains.clear();
 	    }
 	  }
-	  k_info.create_mem_cite = last_decl_line > k_info.init_cite ? last_decl_line : k_info.init_cite;
+	  k_info.create_mem_site = last_decl_line > k_info.init_site ? last_decl_line : k_info.init_site;
           k_info_queue.push_back(k_info);
 
           clean_kernel_info ();
-    	  process_state = 2;
+    	  cur_scope.process_state = 2;
 	}
       }
     }
     Stmt::StmtClass sc = st->getStmtClass();
     if (sc == clang::Stmt::OMPParallelForDirectiveClass) {
+      struct Scope_data &pre_scope = Scope_stack.back();
       Scope_stack.pop_back();
+      struct Scope_data &cur_scope = Scope_stack.back();
+      if (pre_scope.type != 1)
+        cur_scope.process_state = pre_scope.process_state;
     }
     return true;
   }
 
   bool VisitStmt(Stmt *s) {
 
+    if (isa<ForStmt>(s) && Scope_stack.back().process_state == 2) {
+      f_info.return_site = SM->getExpansionLineNumber(s->getLocStart());
+    }
     //Location the outside for stmt in kernel, abstract iteration times
-    if (isa<ForStmt>(s) && process_state == 1) {
+    if (isa<ForStmt>(s) && Scope_stack.back().process_state == 1) {
       //Dump the target for loop, for debug.
       #ifdef DEBUG_INFO
       s->dump();
@@ -657,7 +680,7 @@ public:
     }
 
     //Add all variables that be referenced in kernel, but define out of kernel, into kernel parameters.
-    if (isa<DeclRefExpr>(s) && process_state == 1) {
+    if (isa<DeclRefExpr>(s) && Scope_stack.back().process_state == 1) {
       DeclRefExpr * var_ref = cast<DeclRefExpr>(s);
 
       struct var_data *cur_var;
@@ -696,7 +719,7 @@ public:
 */
 
       //Calculate algebra operation instructions in kernel.
-      if (process_state == 1) {
+      if (Scope_stack.back().process_state == 1) {
 	if (op->isMultiplicativeOp() || op->isAdditiveOp() || op->isShiftOp()) {
 	  k_info.insns ++;
 	}
@@ -705,7 +728,7 @@ public:
       //Handle stmt: scalar_var = xxx;
       //If scalar_var is first used in kernel, then there is no need to transfer its
       //Value.
-      if (process_state == 1 && kind == 0 && lhs.empty()) {
+      if (Scope_stack.back().process_state == 1 && kind == 0 && lhs.empty()) {
 	Expr *lhs = op->getLHS()->IgnoreImpCasts();
         if (isa<DeclRefExpr>(lhs)) {
 	  DeclRefExpr *ref = cast<DeclRefExpr>(lhs);
@@ -754,7 +777,7 @@ public:
 
       //We simple assume: the write mem need transfer from dev to host.
       //The read mem need transfer from host to dev.
-      if (process_state == 1) {
+      if (Scope_stack.back().process_state == 1) {
         struct var_data *cur_var;
 	//lhs is the write to memory.
 	//For =/+=/*= assignment operations.
@@ -810,7 +833,7 @@ public:
       Insert_var_data(d, Scope_stack.back());
 
       //It may also access memory in  declariton expression.
-      if (d->hasInit() && process_state == 1) {
+      if (d->hasInit() && Scope_stack.back().process_state == 1) {
         Expr *init_v = d->getInit()->IgnoreImpCasts();
         if (isa<ArraySubscriptExpr>(init_v)) {
           ArraySubscriptExpr * arr = cast<ArraySubscriptExpr>(init_v);
@@ -833,8 +856,11 @@ public:
 
   bool VisitFunctionDecl (FunctionDecl *f) {
     struct Scope_data &cur_scope = Scope_stack.back();
-    if (f->doesThisDeclarationHaveABody())
+    if (f->doesThisDeclarationHaveABody() && SM->isWrittenInMainFile(f->getLocStart())) {
       cur_scope.p_func = f;
+      if (f_info.start_function < 0)
+	f_info.start_function = SM->getExpansionLineNumber(f->getLocStart());
+    }
     return true;
   }
 
@@ -844,8 +870,6 @@ private:
   struct Kernel_Info k_info;
   std::vector<struct Kernel_Info> &k_info_queue;
   std::vector<struct Scope_data> &Scope_stack;
-  //0: before kernel; 1: in kernel; 2: after kernel.
-  unsigned process_state;
 };
 
 // Implementation of the ASTConsumer interface for reading an AST produced
@@ -918,9 +942,11 @@ public:
 
     generator.set_enter_loop(k_info->enter_loop);
     generator.set_exit_loop(k_info->exit_loop);
-    generator.set_init_cite(k_info->init_cite);
-    generator.set_finish_cite (k_info->finish_cite);
-    generator.set_create_mem_cite (k_info->create_mem_cite);
+    generator.set_init_site(k_info->init_site);
+    generator.set_create_mem_site (k_info->create_mem_site);
+    generator.set_finish_site (f_info.return_site);
+    generator.set_include_site (f_info.last_include);
+    generator.set_cuda_site (f_info.start_function);
 
     struct var_decl var;
 #ifndef GEN_OCL
@@ -958,17 +984,23 @@ public:
     generator.set_logical_streams (2);
     generator.set_task_blocks (4);
 
-#ifndef GEN_OCL
-    //Generate hStreams Code by default
-    generator.generateDevFile();
-    generator.generateHostFile();
-#endif
-
     //Generate OpenCL Code
 #ifdef GEN_OCL
     generator.generateOCLDevFile();
     generator.generateOCLHostFile();
+    return;
 #endif
+
+    //Generate CUDA Code
+#ifdef GEN_CUDA
+    generator.generateCUDAFile();
+    return;
+#endif
+
+    //Generate hStreams Code by default
+    generator.generateDevFile();
+    generator.generateHostFile();
+    return;
   }
 
   std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI,
@@ -982,7 +1014,11 @@ public:
     struct Scope_data new_scope;
     new_scope.type = 0;
     new_scope.p_func = NULL;
+    new_scope.process_state = 0;
     Scope_stack.push_back (new_scope);
+
+    f_info.last_include = -1;
+    f_info.start_function = -1;
 
     return llvm::make_unique<MyASTConsumer>(k_info_queue, Scope_stack);
   }

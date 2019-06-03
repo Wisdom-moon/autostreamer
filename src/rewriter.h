@@ -56,9 +56,9 @@ struct var_data {
 struct Kernel_Info {
   unsigned enter_loop;
   unsigned exit_loop;
-  unsigned init_cite ;
-  unsigned finish_cite;
-  unsigned create_mem_cite;
+  unsigned init_site ;
+  unsigned finish_site;
+  unsigned create_mem_site;
   unsigned replace_line;
   std::vector<mem_xfer> mem_bufs;
   std::vector<var_decl> val_parms;
@@ -89,5 +89,7 @@ struct Scope_data {
   //varables table.
   std::map<std::string, struct var_data> var_table;
   FunctionDecl * p_func;
+  //0: enter a new function body; 1: in kernel; 2: after kernel but in same function.
+  int process_state;
 };
 #endif
