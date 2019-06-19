@@ -161,6 +161,8 @@ class ScopeIR {
 
   void dump(); 
   unsigned int get_call_num();
+
+  bool isInside(ScopeIR *s);
 };
 
 extern ScopeIR * TopScope;

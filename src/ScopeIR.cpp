@@ -375,3 +375,14 @@ unsigned int ScopeIR::get_call_num() {
 
   return sum;
 }
+
+bool ScopeIR::isInside(ScopeIR *s) {
+  if (this == s)
+    return true;
+
+  for (auto&child : children)
+    if (child->isInside(s) == true)
+      return true;
+  
+  return false;
+}

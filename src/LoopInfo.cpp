@@ -255,6 +255,9 @@ void LoopInfo::collectVars() {
     child->collectVars();
     for (auto& child_lv : child->loopVars) {
       bool merged = false;
+      //Do not collect variables which are defined in loop body.
+      if (scope->isInside(child_lv->var_decl->scope) == true)
+	continue;
       LoopVar * new_lv = child_lv->copy();
       for (auto& lv : loopVars)
 	merged = lv->tryMerge(new_lv);
@@ -295,6 +298,9 @@ void LoopInfo::addVar(Access_Var *av) {
       return;
     }
   }
+
+  if (scope->isInside(av->get_decl()->scope) == true)
+    return;
 
   LoopVar * lv = new LoopVar();
   lv->var_decl = av->get_decl();
