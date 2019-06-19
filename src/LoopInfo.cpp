@@ -188,6 +188,9 @@ bool LoopInfo::isCanonical() {
   if (scope->type == 2) {
     if (ForStmt * f = dyn_cast<ForStmt>(scope->condition)) {
       Expr * step = f->getInc();
+      if (step == NULL)
+	return false;
+
       if (BinaryOperator *BinOp = dyn_cast<BinaryOperator>(step)) {
         switch (BinOp->getOpcode()) {
           case BO_MulAssign:

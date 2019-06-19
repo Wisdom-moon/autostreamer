@@ -355,7 +355,7 @@ bool ScopeIR::isVarRelatedExpr(Expr * e, ValueDecl * v) {
       ValueDecl * d = dr->getDecl();
       if (d == v)
 	return true;
-      else {
+      else if (d->getKind() == clang::Decl::Var) {
 	Decl_Var *dv = find_var(d);
 	Position pos(e->getLocStart());
 	Access_Var *av = dv->find_last_access(pos, true);
