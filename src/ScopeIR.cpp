@@ -48,9 +48,12 @@ ValueRange::ValueRange(Expr *e) {
 // Class Decl_Var Implementation.
 // For each variable declar.
 Decl_Var::Decl_Var() {
+  init_value = NULL;
+  pos = NULL;
 }
 
 Decl_Var::Decl_Var(ValueDecl * d) {
+  init_value = NULL;
   pos = new Position(d->getLocation());
   name = d->getName().str();
   decl_stmt = d;
@@ -64,12 +67,7 @@ Decl_Var::Decl_Var(ValueDecl * d) {
 	category = 0;
 	break;
     case Decl::Var:
- 	{
-	  category = 3;
-	  VarDecl *vd = cast<VarDecl> (d);
-	  if (vd->hasInit())
-	    init_value = new ValueRange(vd->getInit()->IgnoreImpCasts());
-	}
+	category = 3;
 	break;
     default:
 	break;
@@ -81,15 +79,17 @@ Decl_Var::Decl_Var(ValueDecl * d) {
 }
 
 Decl_Var::~Decl_Var() {
-    delete init_value;
-    delete pos;
+    if (init_value != NULL)
+      delete init_value;
+    if (pos != NULL)
+      delete pos;
 }
 
 //TODO: We have not consider the loop context;
 Access_Var * Decl_Var::find_last_access(Position &pos, bool iswrite){
-  for (auto i_av = access_chain.cend(); i_av != access_chain.cbegin(); i_av--) {
-    if (*((*i_av)->pos) < pos && (*i_av)->isWrite() == iswrite)
-      return *i_av;
+  for (int i = (int)access_chain.size() - 1; i >= 0; i--) {
+    if (*(access_chain[i]->pos) < pos && access_chain[i]->isWrite() == iswrite)
+      return access_chain[i];
   }
 
   return NULL;
@@ -108,12 +108,14 @@ Access_Var * Decl_Var::find_next_access(Position &pos, bool iswrite){
 // Class Access_Var Implementation.
 // For each access of one variable.
 Access_Var::Access_Var(DeclRefExpr * ref) {
+  value = NULL;
   pos = new Position(ref->getLocation());
   scope = CurScope;
   decl_var = scope->find_var(ref->getDecl());
 }
 
 Access_Var::Access_Var(ArraySubscriptExpr * ArrEx) {
+  value = NULL;
   Expr *base = ArrEx->getBase()->IgnoreImpCasts();
   index.push_back(ArrEx->getIdx()->IgnoreImpCasts());
   decl_var = NULL;
@@ -135,8 +137,16 @@ Access_Var::Access_Var(ArraySubscriptExpr * ArrEx) {
   }
 }
 
+Access_Var::Access_Var(VarDecl * d) {
+  value = NULL;
+  pos = new Position(d->getLocation());
+  scope = CurScope;
+  decl_var = scope->find_var(d);
+}
+
 Access_Var::Access_Var() {
   decl_var = NULL;
+  value = NULL;
 }
 
 Access_Var::~Access_Var() {
@@ -163,6 +173,8 @@ Access_Var * Access_Var::find_next_access(ValueDecl * decl_stmt, bool iswrite) {
 ScopeIR::ScopeIR() {
   info.loop = NULL;
   parent = NULL;
+  condition = NULL;
+  function = NULL;
 }
 
 ScopeIR::~ScopeIR() {
@@ -170,12 +182,20 @@ ScopeIR::~ScopeIR() {
   for (auto& child : children)
     delete child;
 
-  for (auto& dv : decl_chain)
-    delete dv;
+//  for (auto& dv : decl_chain)
+//    delete dv;
 
   for (auto& av : access_chain)
     delete av;
 
+}
+
+void ScopeIR::dump() {
+  if (condition)
+    condition->dump();
+
+  if (function)
+    function->decl_stmt->dump();
 }
 
 
@@ -346,4 +366,12 @@ bool ScopeIR::isVarRelatedExpr(Expr * e, ValueDecl * v) {
   }
 
   return false;
+}
+
+unsigned int ScopeIR::get_call_num() {
+  unsigned int sum = callers.size();
+  for (auto& child : children) 
+    sum += child->get_call_num();
+
+  return sum;
 }

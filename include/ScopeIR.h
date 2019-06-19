@@ -64,11 +64,11 @@ class Decl_Var{
   std::string name;
   std::string type; // Type of variable.
   std::vector <Access_Var *> access_chain;
-  ValueRange * init_value;
 
   public:
   ValueDecl * decl_stmt;
   ScopeIR * scope;
+  ValueRange * init_value;
 
   Decl_Var();
   Decl_Var(ValueDecl * decl);
@@ -82,17 +82,18 @@ class Decl_Var{
 class Access_Var {
   private:
 
-  ScopeIR * scope;
   Decl_Var * decl_var;
   ValueRange *value_range; // For write;
   Expr * value;
 
   public:
+  ScopeIR * scope;
   Position *pos;
   std::vector <Expr *> index;//For array or memory pointer
 
   Access_Var(ArraySubscriptExpr * ArrEx);
   Access_Var(DeclRefExpr * ref);
+  Access_Var(VarDecl * d);
   Access_Var();
   ~Access_Var();
   Access_Var * find_last_access(ValueDecl * decl_stmt, bool isWrite);
@@ -133,6 +134,7 @@ class ScopeIR {
   Stmt * condition; //If, For, switch and  case condition statement which lead to a condition execution.
   Decl_Var * function;
   int last_return_line; //Just for function.
+  std::vector<CallExpr *> callers;
 
   std::vector<ScopeIR *> children;
   std::vector <Access_Var *> access_chain;
@@ -156,7 +158,9 @@ class ScopeIR {
   //Find if the Algebra expression is related to Var, it will trace the compute chain.
   bool isVarRelatedExpr(Expr * e, ValueDecl * v);
   Position * get_start_pos () {return s_pos;}
-  
+
+  void dump(); 
+  unsigned int get_call_num();
 };
 
 extern ScopeIR * TopScope;

@@ -108,6 +108,12 @@ bool LoopInfo::isParallelizable() {
     return false;
   }
 
+  //We omit the loop which has call statement.
+  if (scope->get_call_num() > 0) {
+    parallelizable = -1;
+    return false;
+  }
+
   if (parallelizable == 1)
     return true;
   else if (parallelizable == -1)
@@ -115,7 +121,7 @@ bool LoopInfo::isParallelizable() {
 
   parallelizable= 1;
 
-  //If var is not loop inductive, then var only be read, otherwise will have WAW/RAW/WAR dependence.
+  //If the index of array is not loop inductive or is a scalar, then var only be read or has been initialized in loop, otherwise will have WAW/RAW/WAR dependence.
   //Else is var is loop indective, which means var is memory access and with an index.
     //If var has only one index, there are no dependence between loop iterations.
     //Else if var has two or more indices, then var only be read or we are sure these indices are always not equal in the range of loop.
@@ -123,6 +129,13 @@ bool LoopInfo::isParallelizable() {
   //Collect all var accessed in this loop.
   collectVars();
   for (auto& loop_var : loopVars) {
+    //Except the loop iterator.
+    if (loop_var->var_decl == iter)
+      continue;
+    //Except the scalar variable which has been initialized in loop.
+    if(loop_var->isInitialized() == true)
+      continue;
+
     std::vector <Expr *> index = loop_var->accessInst[0]->index;//For array or memory pointer, array may has more than one dimension indices.
     int num_index = 1;
     bool has_write = false;
@@ -132,7 +145,7 @@ bool LoopInfo::isParallelizable() {
 	num_index ++;
       else {
         for (unsigned int k = 0; k < av->index.size(); k ++) {
-          if (scope->compareAlgebraExpr(index[k], av->index[k]) == false) {
+          if (av->scope->compareAlgebraExpr(index[k], av->index[k]) == false) {
             num_index ++;
 	    break;
 	  }
@@ -143,7 +156,7 @@ bool LoopInfo::isParallelizable() {
         has_write = true;
 
       for (unsigned int k = 0; k < av->index.size(); k ++) {
-        if (scope->isVarRelatedExpr(av->index[k], iter->decl_stmt)) {
+        if (av->scope->isVarRelatedExpr(av->index[k], iter->decl_stmt)) {
 	  iter_related ++;
 	  break;
         }
@@ -239,10 +252,11 @@ void LoopInfo::collectVars() {
     child->collectVars();
     for (auto& child_lv : child->loopVars) {
       bool merged = false;
+      LoopVar * new_lv = child_lv->copy();
       for (auto& lv : loopVars)
-	merged = lv->tryMerge(child_lv);
+	merged = lv->tryMerge(new_lv);
       if (merged == false)
-	loopVars.push_back(child_lv);
+	loopVars.push_back(new_lv);
     }
   }
 
@@ -283,6 +297,14 @@ void LoopInfo::addVar(Access_Var *av) {
   lv->var_decl = av->get_decl();
   lv->addAV(av);
   loopVars.push_back(lv);
+}
+
+int LoopInfo::get_start_line(){
+  return scope->get_start_pos()->get_line();
+}
+
+void LoopInfo::dump() {
+  scope->dump();
 }
 
 //TODO: Need to complete and replace the old KernelExtractor.
@@ -327,4 +349,24 @@ void LoopVar::addAV(Access_Var *av) {
       return;
 
   accessInst.push_back(av);
+}
+
+bool LoopVar::isInitialized() {
+  Access_Var * first = accessInst.front();
+  for (auto&av : accessInst) {
+    if (*(first->pos) > *(av->pos))
+      first = av;
+  }
+
+  if (first->isMem() == false && first->isWrite() == true)
+    return true;
+
+  return false;
+}
+
+LoopVar * LoopVar::copy() {
+  LoopVar * ret = new LoopVar();
+  ret->var_decl = var_decl;
+  ret->accessInst = accessInst;
+  return ret;
 }

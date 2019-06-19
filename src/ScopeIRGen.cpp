@@ -74,8 +74,11 @@ Access_Var * ScopeIRGen::create_av_expr(Expr * e) {
     Decl_Var * p_var = new Decl_Var(d);
     CurScope->append_decl (p_var);
     if (d->hasInit()) {
-          Access_Var * av = create_av_expr (d->getInit()->IgnoreImpCasts());
-	  CurScope->addUDChain(av);
+      p_var->init_value = new ValueRange(d->getInit()->IgnoreImpCasts());
+
+      Access_Var * av = new Access_Var(d);
+      av->set_value(d->getInit()->IgnoreImpCasts());
+      CurScope->addUDChain(av);
     }
     return true;
   }
@@ -89,6 +92,8 @@ Access_Var * ScopeIRGen::create_av_expr(Expr * e) {
       if (func && func->last_return_line < line) 
         func->last_return_line = line; 
     }
+    else if (CallExpr * call_e = dyn_cast<CallExpr> (S))
+      CurScope->callers.push_back(call_e);
  
     return true;
   }
@@ -121,49 +126,51 @@ Access_Var * ScopeIRGen::create_av_expr(Expr * e) {
   return true;
   }
 
+  //0: One file scope; 1: function; 2: for loop; 3: do loop; 4: while loop;
+  //5: if stmt; 6: switch stmt; 7: switch case;
+  //8: Try; 9: Catch; 10: SEH; 11: compound; 12: others.
+  //13: omp parallel for; 14: captured stmt;
+  //15: if then part; 16: if else part;
   bool ScopeIRGen::dataTraverseStmtPre (Stmt *st) {
     ScopeIR * p_scope = new ScopeIR();
+    p_scope->condition = st;
     switch(st->getStmtClass()) {
       case clang::Stmt::CompoundStmtClass:
-	p_scope->type = 2; break;
+	p_scope->type = 11; 
+	break;
       case clang::Stmt::ForStmtClass: ;
-	p_scope->type = 3;
-	p_scope->condition = st;
+	p_scope->type = 2;
 	break;
       case clang::Stmt::IfStmtClass: ;
-	p_scope->type = 4; 
-	p_scope->condition = st;
+	p_scope->type = 5; 
 	break;
       case clang::Stmt::WhileStmtClass: ;
-	p_scope->type = 5; 
-	p_scope->condition = st;
+	p_scope->type = 4; 
 	break;
       case clang::Stmt::DoStmtClass: ;
-	p_scope->type = 6; 
-	p_scope->condition = st;
+	p_scope->type = 3; 
 	break;
       case clang::Stmt::SwitchStmtClass: ;
-	p_scope->type = 7; 
-	p_scope->condition = st;
+	p_scope->type = 6; 
 	break;
 //      case clang::Stmt::SwitchCaseClass: ;
 //	p_scope->type = 8; 
 //	p_scope->condition = st;
 //	break;
       case clang::Stmt::OMPParallelForDirectiveClass: ;
-	p_scope->type = 9; break;
-      case clang::Stmt::CXXCatchStmtClass: ;
-	p_scope->type = 10; break;
-      case clang::Stmt::CXXForRangeStmtClass: ;
-	p_scope->type = 11; break;
-      case clang::Stmt::CXXTryStmtClass: ;
-	p_scope->type = 12; break;
-      case clang::Stmt::SEHExceptStmtClass: ;
 	p_scope->type = 13; break;
+      case clang::Stmt::CXXCatchStmtClass: ;
+	p_scope->type = 9; break;
+      case clang::Stmt::CXXForRangeStmtClass: ;
+	p_scope->type = 12; break;
+      case clang::Stmt::CXXTryStmtClass: ;
+	p_scope->type = 8; break;
+      case clang::Stmt::SEHExceptStmtClass: ;
+	p_scope->type = 10; break;
       case clang::Stmt::SEHFinallyStmtClass: ;
-	p_scope->type = 14; break;
+	p_scope->type = 12; break;
       case clang::Stmt::CapturedStmtClass: ;
-	p_scope->type = 15; break;
+	p_scope->type = 14; break;
       default:
 	delete p_scope;
 	p_scope = NULL;
@@ -295,6 +302,7 @@ Access_Var * ScopeIRGen::create_av_expr(Expr * e) {
 	  e = ifs->getThen();
 	  if (e) {
             ScopeIR * true_scope = new ScopeIR();
+	    true_scope->condition = e;
 	    true_scope->type = 15;
             true_scope->s_pos = new Position(e->getLocStart());
             true_scope->e_pos = new Position(e->getLocEnd());
@@ -307,6 +315,7 @@ Access_Var * ScopeIRGen::create_av_expr(Expr * e) {
 	  e = ifs->getElse();
 	  if (e) {
             ScopeIR * false_scope = new ScopeIR();
+	    false_scope->condition = e;
 	    false_scope->type = 16;
             false_scope->s_pos = new Position(e->getLocStart());
             false_scope->e_pos = new Position(e->getLocEnd());

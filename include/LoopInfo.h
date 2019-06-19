@@ -27,6 +27,8 @@ class LoopVar {
   ~LoopVar() {}
   bool tryMerge(LoopVar * lv);
   void addAV(Access_Var *);
+  bool isInitialized();
+  LoopVar * copy();
 };
 
 class LoopInfo {
@@ -43,12 +45,12 @@ class LoopInfo {
   
   Decl_Var * iter;
 
-  std::vector<LoopInfo *> children;
   void collectVars();
   void addVar(Access_Var *);
   std::vector<LoopInfo *> createInnerLoop(ScopeIR *s);
 
   public:
+  std::vector<LoopInfo *> children;
   ScopeIR * scope;
 
   LoopInfo() {scope=NULL;hasCollected=false;parallelizable=0;perfect=0;canonical=0;}
@@ -62,6 +64,9 @@ class LoopInfo {
   void buildLoopTree();
 
   void genKernelInfo(Kernel_Info &ki);
+
+  int get_start_line();
+  void dump();
 };
 
 #endif

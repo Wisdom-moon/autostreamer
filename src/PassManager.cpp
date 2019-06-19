@@ -36,6 +36,24 @@ bool MyASTConsumer::HandleTopLevelDecl(DeclGroupRef DR) {
       }
     }
   }
+  //Test code.
+  for (auto& func : funcList) {
+    LoopInfo * root = func->rootLoop;
+    std::deque<LoopInfo *> loop_que;
+    loop_que.push_back(root);
+    while (loop_que.empty() == false) {
+      LoopInfo * loop = loop_que.front();
+      loop_que.pop_front();
+      for (auto& child : loop->children) {
+	if (child->isParallelizable() == true) {
+	  std::cout << "Loop at line " << child->get_start_line() << " can be parallel.\n";
+	  //child->dump();
+	}
+	else
+	  loop_que.push_back(child);
+      }
+    }
+  }
 
 
   for (DeclGroupRef::iterator b = DR.begin(), e = DR.end(); b != e; ++b) {

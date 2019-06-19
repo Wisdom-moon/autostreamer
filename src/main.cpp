@@ -28,6 +28,6 @@ int main(int argc, const char **argv) {
   // To further customize this, we could create our own factory class.
   int ret = Tool.run(newFrontendActionFactory<MyFrontendAction>().get());
 
-  delete TopScope;
+  //delete TopScope;
   return ret;
 }
