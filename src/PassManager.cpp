@@ -1,111 +1,81 @@
 //------------------------------------------------------------------------------
-// OpenMP to hStreams:
+// C to hStreams:
 //
 // Peng Zhang(pengzhang_nudt@sina.com)
 // This code is in the public domain
 //------------------------------------------------------------------------------
-#include "rewriter.h"
+#include "PassManager.h"
 
 //#define DEBUG_INFO
 #define GEN_CUDA
 //#define GEN_OCL
 
-static llvm::cl::OptionCategory ToolingSampleCategory("Tooling Sample");
-
 // By implementing RecursiveASTVisitor, we can specify which AST nodes
 // we're interested in by overriding relevant methods.
 
-struct File_info {
-  int last_include = 0;
-  int start_function = 0;
-  int return_site = 0;
-} f_info;
-
-// Implementation of the ASTConsumer interface for reading an AST produced
-// by the Clang parser.
-class MyASTConsumer : public ASTConsumer {
-public:
-  MyASTConsumer(std::vector<struct Kernel_Info> &k_info_queue, std::vector<struct Scope_data> &s_stack) : Visitor(k_info_queue, s_stack), Scope_stack(s_stack) {}
+File_Info f_info;
 
   // Override the method that gets called for each parsed top-level
   // declaration.
-  bool HandleTopLevelDecl(DeclGroupRef DR) override {
-    for (DeclGroupRef::iterator b = DR.begin(), e = DR.end(); b != e; ++b) {
-      if (SM.isWrittenInMainFile((*b)->getLocation()))
-        Analyser.TraverseDecl(*b);
-    }
-
-    //Construct FunctionInfo and LoopInfo.
-    std::vector<FunctionInfo *> funcList;
-    for (int i = 0; i < TopScope->children.size(); i++) {
-      ScopeIR * fileScope = TopScope->children[i];
-      for (int j = 0; j < fileScope->children.size(); j++) {
-	ScopeIR * funcScope = fileScope->children[j];
-	if (funcScope->type == 1) {
-	  FunctionInfo *funcInfo = new FunctionInfo(funcScope);
-	  funcInfo->rootLoop = new LoopInfo(funcScope);
-	  funcInfo->rootLoop->buildLoopTree();
-
-	  funcList.push_back(funcInfo);
-	}
-      }
-    }
-
-
-    for (DeclGroupRef::iterator b = DR.begin(), e = DR.end(); b != e; ++b) {
-      // Traverse the declaration using our AST visitor.
-      Visitor.TraverseDecl(*b);
-    }
-    return true;
+bool MyASTConsumer::HandleTopLevelDecl(DeclGroupRef DR) {
+  for (DeclGroupRef::iterator b = DR.begin(), e = DR.end(); b != e; ++b) {
+    if (SM->isWrittenInMainFile((*b)->getLocation()))
+      scopeGen.TraverseDecl(*b);
   }
 
-  virtual void Initialize(ASTContext &Context) {
-    Ctx = &Context;
-    Visitor.Initialize (Context);
-  }
+  //Construct FunctionInfo and LoopInfo.
+  std::vector<FunctionInfo *> funcList;
+  for (auto& fileScope : TopScope->children) {
+    for (auto& funcScope : fileScope->children) {
+      if (funcScope->type == 1) {
+        FunctionInfo *funcInfo = new FunctionInfo(funcScope);
+        funcInfo->rootLoop = new LoopInfo(funcScope);
+        funcInfo->rootLoop->buildLoopTree();
 
-private:
-  MyASTVisitor Visitor;
-  ASTContext *Ctx;
-  std::vector<struct Scope_data> &Scope_stack;
-};
-
-// For each source file provided to the tool, a new FrontendAction is created.
-class MyFrontendAction : public ASTFrontendAction {
-private:
-  struct Kernel_Info * select_kernel () {
-    struct Kernel_Info * ret = NULL;
-    unsigned int max_insns = 0;
-    unsigned int max_overlap_mems = 0;
-    unsigned int max_mems = 0;
-    for (auto &k_info : k_info_queue) {
-      unsigned int overlap_mems = 0;
-      unsigned int mems = 0;
-      for (auto &mem_buf : k_info.mem_bufs) {
-	//Pre transfer mem 
-	if (mem_buf.type & 1) 
-	    mems++;
-	if (mem_buf.type & 2) 
-	  overlap_mems++;
-	if (mem_buf.type & 4)
-	  overlap_mems++;
-	if (mem_buf.type & 8)
-	  mems++;
-      }
-      mems += overlap_mems;
-
-      if (k_info.insns > max_insns) {
-	max_insns = k_info.insns;
-	ret = &k_info;
+        funcList.push_back(funcInfo);
       }
     }
-    return ret;
   }
-public:
-  MyFrontendAction() {}
 
-//Callback at the end of processing a single input.
-  void EndSourceFileAction() override {
+
+  for (DeclGroupRef::iterator b = DR.begin(), e = DR.end(); b != e; ++b) {
+    // Traverse the declaration using our AST visitor.
+    Visitor.TraverseDecl(*b);
+  }
+  return true;
+}
+
+
+struct Kernel_Info * MyFrontendAction::select_kernel () {
+  struct Kernel_Info * ret = NULL;
+  unsigned int max_insns = 0;
+  //unsigned int max_overlap_mems = 0;
+  //unsigned int max_mems = 0;
+  for (auto &k_info : k_info_queue) {
+    unsigned int overlap_mems = 0;
+    unsigned int mems = 0;
+    for (auto &mem_buf : k_info.mem_bufs) {
+      //Pre transfer mem 
+      if (mem_buf.type & 1) 
+          mems++;
+      if (mem_buf.type & 2) 
+        overlap_mems++;
+      if (mem_buf.type & 4)
+        overlap_mems++;
+      if (mem_buf.type & 8)
+        mems++;
+    }
+    mems += overlap_mems;
+
+    if (k_info.insns > max_insns) {
+      max_insns = k_info.insns;
+      ret = &k_info;
+    }
+  }
+  return ret;
+}
+
+  void MyFrontendAction::EndSourceFileAction() {
 
     struct Kernel_Info * k_info = select_kernel ();
     if (k_info == NULL)
@@ -174,8 +144,8 @@ public:
     return;
   }
 
-  std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI,
-                                                 StringRef file) override {
+  std::unique_ptr<ASTConsumer> MyFrontendAction::CreateASTConsumer(CompilerInstance &CI,
+                                                 StringRef file) {
     llvm::errs() << "** Creating AST consumer for: " << file << "\n";
     std::string f_name = file.str();
     int f_index = f_name.find_last_of('/');
@@ -194,8 +164,3 @@ public:
     return llvm::make_unique<MyASTConsumer>(k_info_queue, Scope_stack);
   }
 
-private:
-  WriteInFile generator;
-  std::vector<struct Kernel_Info> k_info_queue;
-  std::vector<struct Scope_data> Scope_stack;
-};

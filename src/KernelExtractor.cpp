@@ -1,18 +1,15 @@
 //------------------------------------------------------------------------------
-// OpenMP to hStreams:
+// C to hStreams:
 //
 // Peng Zhang(pengzhang_nudt@sina.com)
 // This code is in the public domain
 //------------------------------------------------------------------------------
-#include "KernelInfo.h"
-#include "ScopeIR.h"
 
+#include "KernelExtractor.h"
 
-class KernelExtractor : public RecursiveASTVisitor<KernelExtractor> {
-private:
 
   //To find is var is used in expr e.
-  bool find_usage (Expr * e, ValueDecl * var) {
+  bool KernelExtractor::find_usage (Expr * e, ValueDecl * var) {
     e = e->IgnoreImpCasts();
     if (isa<DeclRefExpr>(e)) {
       DeclRefExpr *ref = cast<DeclRefExpr> (e);
@@ -37,7 +34,7 @@ private:
 
   
   //Handle DelcRef in index expr.
-  int analysis_declref (DeclRefExpr *ref, std::string &min, std::string &max) {
+  int KernelExtractor::analysis_declref (DeclRefExpr *ref, std::string &min, std::string &max) {
     int ret = 3;
     struct var_data *cur_var;
     query_var (ref->getDecl()->getName().str(), &cur_var);
@@ -57,7 +54,7 @@ private:
     return ret;
   }
   //Handle ParenExpr in BinaryOperator.
-  int analysis_paren (Expr *idx, std::string &min, std::string &max) {
+  int KernelExtractor::analysis_paren (Expr *idx, std::string &min, std::string &max) {
     int ret = 0;
     if (isa<ParenExpr> (idx)) {
       Expr *e = cast<ParenExpr> (idx)->getSubExpr()->IgnoreImpCasts();
@@ -83,7 +80,7 @@ private:
     return ret;
   }
   //Analysis binary operator, give its min value and max value.
-  int analysis_bin_op (BinaryOperator *op, std::string &min, std::string &max) {
+  int KernelExtractor::analysis_bin_op (BinaryOperator *op, std::string &min, std::string &max) {
 
     int ret = 0;
     int l_ret = 0;
@@ -159,7 +156,7 @@ private:
   //Analysis Expr vector(arry's 1st dim index), return its min value and max value.
   //Because the type of mult-array is a pointer that point to 
   //(dim -1) mult-array
-  int analysis_index (Expr * idx, std::string &min, std::string &max) {
+  int KernelExtractor::analysis_index (Expr * idx, std::string &min, std::string &max) {
     int ret = 0;
     if (idx == NULL)
       return ret;
@@ -185,7 +182,7 @@ private:
 
     return ret;
   }
-  void evalue_index (Expr *idx, struct var_data *cur_var) {
+  void KernelExtractor::evalue_index (Expr *idx, struct var_data *cur_var) {
     std::string min;
     std::string max;
     int value = analysis_index (idx, min, max);
@@ -207,7 +204,7 @@ private:
   }
 
   //Analysis ArraySubscriptExpr, maybe mult dim array.
-  void analysis_array (ArraySubscriptExpr *arr, std::string &base_name,
+  void KernelExtractor::analysis_array (ArraySubscriptExpr *arr, std::string &base_name,
 			std::vector<Expr *> &idx_arry) {
     Expr *base = arr->getBase()->IgnoreImpCasts();
     Expr *idx  = arr->getIdx()->IgnoreImpCasts();
@@ -228,7 +225,7 @@ private:
   //All other mem access is read.
   //return 0: is a assignment opt. 1: others.
   //return 2: *=/+= compound assignment.
-  int check_mem_access (BinaryOperator *op, std::string &lhs,
+  int KernelExtractor::check_mem_access (BinaryOperator *op, std::string &lhs,
 			std::vector<Expr *> &lhs_idx,
 			std::string &rhs, 
 			std::vector<Expr *> &rhs_idx) {
@@ -282,7 +279,7 @@ private:
   }
 
   //Get the spelling string for Stmt *s.
-  std::string get_str(Stmt *s){
+  std::string KernelExtractor::get_str(Stmt *s){
     std::string ret;
 
     if (isa<DeclRefExpr>(s)) {
@@ -301,7 +298,7 @@ private:
     return ret;
   }
   //return which level scope define this var, 0 means in kernel, 1 means out of kernel.
-  unsigned query_var (std::string name, struct var_data ** var) {
+  unsigned KernelExtractor::query_var (std::string name, struct var_data ** var) {
     unsigned ret = 0;
     unsigned level = 0;
     unsigned size = Scope_stack.size();
@@ -323,7 +320,7 @@ private:
     return ret;
   }
 
-  struct var_data * Insert_var_data (VarDecl *d, 
+  struct var_data * KernelExtractor::Insert_var_data (VarDecl *d, 
 				struct Scope_data &cur_scope) {
     struct var_data * new_var;
     if (cur_scope.var_table.find(d->getName().str()) == cur_scope.var_table.end()) {
@@ -351,7 +348,7 @@ private:
     return new_var;
   }
 
-  void clean_kernel_info () {
+  void KernelExtractor::clean_kernel_info () {
     k_info.enter_loop = 0;
     k_info.exit_loop = 0;
     k_info.init_site = 0;
@@ -370,18 +367,10 @@ private:
   }
 
 
-public:
-  KernelExtractor(std::vector<struct Kernel_Info> &k, std::vector<struct Scope_data> &s_stack): k_info_queue(k), Scope_stack(s_stack)  {
-    clean_kernel_info ();
-  }
-  void Initialize(ASTContext &Context) {
-    Ctx = &Context;
-    SM = &(Ctx->getSourceManager());
-  }
 
   //Invoked before visiting a statement or expression.
   //Return false to skip visiting the node.
-  bool dataTraverseStmtPre (Stmt *st) {
+  bool KernelExtractor::dataTraverseStmtPre (Stmt *st) {
 
       struct Scope_data &cur_scope = Scope_stack.back();
       struct Scope_data new_scope;
@@ -461,7 +450,7 @@ public:
  
   //Invoked after visiting a statement or expression via data recursion.
   //return false if the visitation was terminated early.
-  bool dataTraverseStmtPost (Stmt *st) {
+  bool KernelExtractor::dataTraverseStmtPost (Stmt *st) {
     if (isa<CompoundStmt>(st) || isa<WhileStmt>(st) || isa<CXXCatchStmt>(st)
        || isa<CXXForRangeStmt>(st) || isa<CXXTryStmt>(st) || isa<DoStmt>(st)
        || isa<ForStmt>(st) || isa<IfStmt>(st) || isa<SEHExceptStmt>(st)
@@ -570,7 +559,7 @@ public:
     return true;
   }
 
-  bool VisitStmt(Stmt *s) {
+  bool KernelExtractor::VisitStmt(Stmt *s) {
 
     if (isa<ForStmt>(s) && Scope_stack.back().process_state == 2) {
       f_info.return_site = SM->getExpansionLineNumber(s->getLocStart());
@@ -814,7 +803,7 @@ public:
     return true;
   }
 
-  bool VisitVarDecl(VarDecl *d) {
+  bool KernelExtractor::VisitVarDecl(VarDecl *d) {
     if (d->getKind() == Decl::Var) {
       Insert_var_data(d, Scope_stack.back());
 
@@ -840,18 +829,13 @@ public:
     return true;
   }
 
-  bool VisitFunctionDecl (FunctionDecl *f) {
-    struct Scope_data &cur_scope = Scope_stack.back();
-    if (f->doesThisDeclarationHaveABody() && SM->isWrittenInMainFile(f->getLocStart())) {
-      cur_scope.p_func = f;
-      if (f_info.start_function < 0)
+bool KernelExtractor::VisitFunctionDecl (FunctionDecl *f) {
+  struct Scope_data &cur_scope = Scope_stack.back();
+  if (f->doesThisDeclarationHaveABody() && SM->isWrittenInMainFile(f->getLocStart())) {
+    cur_scope.p_func = f;
+    if (f_info.start_function < 0)
 	f_info.start_function = SM->getExpansionLineNumber(f->getLocStart());
-    }
-    return true;
   }
+  return true;
+}
 
-private:
-  struct Kernel_Info k_info;
-  std::vector<struct Kernel_Info> &k_info_queue;
-  std::vector<struct Scope_data> &Scope_stack;
-};

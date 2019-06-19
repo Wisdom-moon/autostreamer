@@ -12,21 +12,23 @@
 #include <string>
 #include <iostream>
 
-#include "clang/AST/AST.h"
-#include "clang/AST/ASTConsumer.h"
-#include "clang/AST/RecursiveASTVisitor.h"
-#include "clang/Frontend/ASTConsumers.h"
-#include "clang/Frontend/CompilerInstance.h"
-#include "clang/Frontend/FrontendActions.h"
-#include "clang/Tooling/CommonOptionsParser.h"
-#include "clang/Tooling/Tooling.h"
-#include "llvm/Support/raw_ostream.h"
+#include "ClangHeader.h"
 
-#include "CodeGen.h"
+struct var_decl {
+  std::string type_name;
+  std::string var_name;
+  unsigned id;//the order in kernel args.
+  unsigned type;//00=value + fix, 01=point+fix, 10=value+var, 11=p+v.
+};
 
-using namespace clang;
-using namespace clang::driver;
-using namespace clang::tooling;
+struct mem_xfer {
+  std::string  buf_name;
+  std::string size_string;
+  std::string type_name;
+  std::string elem_type;
+  unsigned dim;//The dim of arry;
+  unsigned type;//x1:pre_xfers; x1x:h2d; 1xx:d2h; 1xxx: post_xfer
+};
 
 struct var_data {
   std::string name;
@@ -71,7 +73,7 @@ struct Scope_data {
   int process_state;
 };
 
-struct File_info {
+struct File_Info {
   int last_include = 0;
   int start_function = 0;
   int return_site = 0;

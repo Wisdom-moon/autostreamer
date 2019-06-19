@@ -9,6 +9,7 @@
 #define FUNCTIONINFO_H
 
 #include "ScopeIR.h"
+#include "KernelInfo.h"
 
 //TODO:Construct the caller and callee graph.
 class FunctionInfo {
@@ -18,11 +19,11 @@ class FunctionInfo {
   LoopInfo *rootLoop;
   ScopeIR * scope;
 
-  FunctionInfo() {rootLoop = NULL: scope = NULL;}
-  FunctionInfo(ScopeIR * s) {rootLoop = NULL: scope = s; s->setFunctionInfo(this);}
+  FunctionInfo() {rootLoop = NULL; scope = NULL;}
+  FunctionInfo(ScopeIR * s) {rootLoop = NULL; scope = s; s->setFunctionInfo(this);}
   ~FunctionInfo() {}
 
   void genFileInfo(File_Info & fi);
-}
+};
 
 #endif

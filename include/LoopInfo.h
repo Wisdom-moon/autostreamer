@@ -9,23 +9,25 @@
 #define LOOPINFO_H
 
 #include "ScopeIR.h"
+#include "KernelInfo.h"
 
 class LoopVar {
   private:
-  Decl_Var * var_decl;
   // For these flags, 0 means undefine, -1 means false, 1 means true;
   int inductive;
 
   //TODO: wait for further dependence analysis need.
   //std::vector<std::pair<Access_Var *, Access_Var *>> dependenceMap;
-  std::vector<Access_Var *> accessInst;
 
   public:
+  std::vector<Access_Var *> accessInst;
+  Decl_Var * var_decl;
+
   LoopVar() {var_decl = NULL;inductive = 0;}
   ~LoopVar() {}
   bool tryMerge(LoopVar * lv);
   void addAV(Access_Var *);
-}
+};
 
 class LoopInfo {
   private:
@@ -41,10 +43,10 @@ class LoopInfo {
   
   Decl_Var * iter;
 
-  LoopInfo * createInnerLoop();
   std::vector<LoopInfo *> children;
   void collectVars();
-  LoopVar * addVar(Access_Var *);
+  void addVar(Access_Var *);
+  std::vector<LoopInfo *> createInnerLoop(ScopeIR *s);
 
   public:
   ScopeIR * scope;
@@ -60,6 +62,6 @@ class LoopInfo {
   void buildLoopTree();
 
   void genKernelInfo(Kernel_Info &ki);
-}
+};
 
 #endif

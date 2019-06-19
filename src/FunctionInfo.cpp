@@ -21,6 +21,6 @@ void FunctionInfo::genFileInfo(File_Info & fi) {
 
   //Find the first decl stmt in file scope.
   fi.last_include = f_scope->get_var(0)->get_pos()->get_line();
-  fi.start_function = scope->get_start_pos->get_line();
+  fi.start_function = scope->get_start_pos()->get_line();
   fi.return_site = scope->last_return_line;
 }

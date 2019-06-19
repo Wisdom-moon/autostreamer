@@ -5,35 +5,27 @@
 // This code is in the public domain
 //------------------------------------------------------------------------------
 
-class ExprSerializer: public RecursiveASTVisitor<ExprSerializer> {
+#include "Util.h"
 
-public:
-  void clear() {output.clear();}
-  std::vector<Expr *> getOutput {return output;}
-
-  bool VisitStmt(Stmt *s) {
-    if (s == NULL)
-      return true;
-    switch (s->getStmtClass()) {
-      case clang::Stmt::BinaryOperator:
-      case clang::Stmt::CompoundAssignOperator:
-      case clang::Stmt::UnaryOperator:
-      case clang::Stmt::DeclRefExpr:
-      case clang::Stmt::IntegerLiteral:
-      case clang::Stmt::FloatingLiteral:
-      case clang::Stmt::ImaginaryLiteral:
-      case clang::Stmt::ParenExpr:
-      case clang::Stmt::ArraySubscriptExpr:
-      case clang::Stmt::MemberExpr:
-	output.push_back(s);
-	break;
-      default:
-	break;
-    }
-
+bool ExprSerializer::VisitStmt(Stmt *s) {
+  if (s == NULL)
     return true;
+  switch (s->getStmtClass()) {
+    case clang::Stmt::BinaryOperatorClass:
+    case clang::Stmt::CompoundAssignOperatorClass:
+    case clang::Stmt::UnaryOperatorClass:
+    case clang::Stmt::DeclRefExprClass:
+    case clang::Stmt::IntegerLiteralClass:
+    case clang::Stmt::FloatingLiteralClass:
+    case clang::Stmt::ImaginaryLiteralClass:
+    case clang::Stmt::ParenExprClass:
+    case clang::Stmt::ArraySubscriptExprClass:
+    case clang::Stmt::MemberExprClass:
+      output.push_back(cast<Expr>(s));
+      break;
+    default:
+      break;
   }
 
-private:
-  std::vector<Expr *> output;
+  return true;
 }

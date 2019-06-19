@@ -13,8 +13,7 @@
 #ifndef SCOPEIR_H
 #define SCOPEIR_H
 
-#include <vector>
-
+#include "ClangHeader.h"
 
 class ScopeIR;
 class Access_Var;
@@ -36,7 +35,7 @@ class Position {
   bool operator<(const Position & pos);
   bool operator>(const Position & pos);
   unsigned int get_line() {return line;}
-}
+};
 
 class ValueRange {
   private:
@@ -50,7 +49,7 @@ class ValueRange {
   ValueRange();
   ValueRange(Expr * e);
   ~ValueRange();
-}
+};
 
 class Decl_Var{
   private:
@@ -64,64 +63,64 @@ class Decl_Var{
   int category; 
   std::string name;
   std::string type; // Type of variable.
-  ScopeIR * scope;
   std::vector <Access_Var *> access_chain;
   ValueRange * init_value;
 
   public:
-  Decl * decl_stmt;
+  ValueDecl * decl_stmt;
+  ScopeIR * scope;
 
   Decl_Var();
-  Decl_Var(Decl * decl);
+  Decl_Var(ValueDecl * decl);
   ~Decl_Var();
   Access_Var * find_last_access(Position &pos, bool isWrite);
   Access_Var * find_next_access(Position &pos, bool isWrite);
   void append_access(Access_Var * av) {access_chain.push_back(av);}
   Position * get_pos() {return pos;}
-}
+};
 
 class Access_Var {
   private:
 
-  Position *pos;
-  ScopeIR * ptr_scope;
-  Decl_Var * ptr_decl;
+  ScopeIR * scope;
+  Decl_Var * decl_var;
   ValueRange *value_range; // For write;
   Expr * value;
 
   public:
+  Position *pos;
   std::vector <Expr *> index;//For array or memory pointer
 
   Access_Var(ArraySubscriptExpr * ArrEx);
   Access_Var(DeclRefExpr * ref);
   Access_Var();
   ~Access_Var();
-  Access_Var * find_last_access(Decl * decl_stmt, bool isWrite);
-  Access_Var * find_next_access(Decl * decl_stmt, bool isWrite);
-  Decl_Var * get_decl();
-  bool isValid() {return (ptr_decl != NULL);}
+  Access_Var * find_last_access(ValueDecl * decl_stmt, bool isWrite);
+  Access_Var * find_next_access(ValueDecl * decl_stmt, bool isWrite);
+  Decl_Var * get_decl(){return decl_var;}
+  bool isValid() {return (decl_var != NULL);}
   void set_index(Expr * e) {index.clear(); index.push_back(e);}
   void set_value (Expr *e) {value = e;}
-  Expr * get_value () {return value}
+  Expr * get_value () {return value;}
   
   bool isWrite() {return value ? true: false;}
-  bool isMem() {return index ? true: false;}
-}
+  bool isMem() {return index.empty() ? false : true;}
+};
 
 class ScopeIR {
   private:
 
-  //Start and End position of this scope;
-  Position *s_pos;
-  Position *e_pos;
   std::vector <Decl_Var *> decl_chain;
 
-  enum {
+  union {
     LoopInfo * loop;
     FunctionInfo * func;
   } info;
 
   public:
+  //Start and End position of this scope;
+  Position *s_pos;
+  Position *e_pos;
 
   //-1: Program scope;
   //0: One file scope; 1: function; 2: for loop; 3: do loop; 4: while loop;
@@ -131,7 +130,7 @@ class ScopeIR {
   //15: if then part; 16: if else part;
   unsigned int type;
   ScopeIR * parent;
-  Expr * condition; //If, For, switch and  case condition expression which lead to a condition execution.
+  Stmt * condition; //If, For, switch and  case condition statement which lead to a condition execution.
   Decl_Var * function;
   int last_return_line; //Just for function.
 
@@ -140,11 +139,11 @@ class ScopeIR {
 
   ScopeIR();
   ~ScopeIR();
-  Decl_Var * find_var(Decl * decl_stmt);
-  Decl_Var * get_var(int n) {if (0 <= n < decl_chain.size())return decl_chain[n];}
-  void add_child();
+  Decl_Var * find_var(ValueDecl * decl_stmt);
+  Decl_Var * get_var(unsigned int n) {return decl_chain[n];}
+  void add_child(ScopeIR * scope);
 
-  void add_UDChain(Expr *e, bool flag_read = true);
+  void addUDChain(Access_Var * acc_var);
   void append_decl(Decl_Var * dv) {decl_chain.push_back(dv); dv->scope = this;}
 
   bool setLoopInfo (LoopInfo * loop); 
@@ -155,12 +154,12 @@ class ScopeIR {
   //Compare two algebra expression has the same value in this context.
   bool compareAlgebraExpr(Expr * e1, Expr * e2);
   //Find if the Algebra expression is related to Var, it will trace the compute chain.
-  bool isVarRelatedExpr(Expr * e, Decl * v);
+  bool isVarRelatedExpr(Expr * e, ValueDecl * v);
   Position * get_start_pos () {return s_pos;}
   
-}
+};
 
-ScopeIR * TopScope;
-SourceManager *SM;
-ScopeIR * CurScope;
+extern ScopeIR * TopScope;
+extern ScopeIR * CurScope;
+
 #endif

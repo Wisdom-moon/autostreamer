@@ -17,21 +17,7 @@
 #include <vector>
 #include <string>
 
-struct var_decl {
-  std::string type_name;
-  std::string var_name;
-  unsigned id;//the order in kernel args.
-  unsigned type;//00=value + fix, 01=point+fix, 10=value+var, 11=p+v.
-};
-
-struct mem_xfer {
-  std::string  buf_name;
-  std::string size_string;
-  std::string type_name;
-  std::string elem_type;
-  unsigned dim;//The dim of arry;
-  unsigned type;//x1:pre_xfers; x1x:h2d; 1xx:d2h; 1xxx: post_xfer
-};
+#include "KernelInfo.h"
 
 class CodeGen {
 

@@ -5,7 +5,11 @@
 // This code is in the public domain
 //------------------------------------------------------------------------------
 
-#include "Scope.h"
+#include <iostream>
+#include "ScopeIR.h"
+#include "LoopInfo.h"
+#include "FunctionInfo.h"
+#include "Util.h"
 
 // Class Position
 Position::Position() {
@@ -24,26 +28,21 @@ bool Position::operator<(const Position & pos){
 }
 
 bool Position::operator>(const Position & pos){
-  return (line > pos.line || (line == pos.line && col k pos.col));
+  return (line > pos.line || (line == pos.line && col > pos.col));
 }
 
-// Class Value_Range Implementation.
-Value_Range::Value_Range() {
+// Class ValueRange Implementation.
+ValueRange::ValueRange() {
 }
 
-Value_Range::~Value_Range() {
+ValueRange::~ValueRange() {
 }
 
-Value_Range::Value_Range(Expr *e) {
+ValueRange::ValueRange(Expr *e) {
   lower_boundary = e;
   lower_offset = 0;
   upper_boundary = e;
   upper_offset = 0;
-}
-
-bool Value_Range::isRelated(Decl_Var * d){
-
-  return true;
 }
 
 // Class Decl_Var Implementation.
@@ -51,7 +50,7 @@ bool Value_Range::isRelated(Decl_Var * d){
 Decl_Var::Decl_Var() {
 }
 
-Decl_Var::Decl_Var(Decl * d) {
+Decl_Var::Decl_Var(ValueDecl * d) {
   pos = new Position(d->getLocation());
   name = d->getName().str();
   decl_stmt = d;
@@ -65,10 +64,11 @@ Decl_Var::Decl_Var(Decl * d) {
 	category = 0;
 	break;
     case Decl::Var:
-	category = 3;
-	if (d->hasInit()) {
-	  init_value = new ValueRange(d->getInit()->IgnoreImpCasts());
-	  CurScope->add_UDChain(d->getInit()->IgnoreImpCasts(), false);
+ 	{
+	  category = 3;
+	  VarDecl *vd = cast<VarDecl> (d);
+	  if (vd->hasInit())
+	    init_value = new ValueRange(vd->getInit()->IgnoreImpCasts());
 	}
 	break;
     default:
@@ -81,27 +81,27 @@ Decl_Var::Decl_Var(Decl * d) {
 }
 
 Decl_Var::~Decl_Var() {
-  for (int i = 0; i < init_value.size(); i++)
-    delete init_value[i];
+    delete init_value;
+    delete pos;
 }
 
 //TODO: We have not consider the loop context;
 Access_Var * Decl_Var::find_last_access(Position &pos, bool iswrite){
-  for (int i = access_chain.size() - 1; i >= 0; i++) {
-    if (access_chain[i]->pos < pos && access_chain[i]->isWrite() == iswrite)
-      return access_chain[i];
+  for (auto i_av = access_chain.cend(); i_av != access_chain.cbegin(); i_av--) {
+    if (*((*i_av)->pos) < pos && (*i_av)->isWrite() == iswrite)
+      return *i_av;
   }
 
-  return NULL:
+  return NULL;
 }
 
 Access_Var * Decl_Var::find_next_access(Position &pos, bool iswrite){
-  for (int i = 0; i < access_chain.size(); i++) {
-    if (access_chain[i]->pos > pos && access_chain[i]->isWrite() == iswrite)
-      return access_chain[i];
+  for (auto& av : access_chain) {
+    if (*(av->pos) > pos && av->isWrite() == iswrite)
+      return av;
   }
 
-  return NULL:
+  return NULL;
 }
 
 
@@ -109,58 +109,53 @@ Access_Var * Decl_Var::find_next_access(Position &pos, bool iswrite){
 // For each access of one variable.
 Access_Var::Access_Var(DeclRefExpr * ref) {
   pos = new Position(ref->getLocation());
-  ptr_scope = CurScope;
-  ptr_decl = ref->getDecl();
+  scope = CurScope;
+  decl_var = scope->find_var(ref->getDecl());
 }
 
 Access_Var::Access_Var(ArraySubscriptExpr * ArrEx) {
   Expr *base = ArrEx->getBase()->IgnoreImpCasts();
   index.push_back(ArrEx->getIdx()->IgnoreImpCasts());
-  ptr_decl = NULL;
+  decl_var = NULL;
 
   while (isa<ArraySubscriptExpr>(base)) {
-    ArraySubsciptExpr * a = dyn_cast<ArraySubscriptExpr>(base);
+    ArraySubscriptExpr * a = dyn_cast<ArraySubscriptExpr>(base);
     index.push_back(a->getIdx()->IgnoreImpCasts());
     base = a->getBase()->IgnoreImpCasts();
   }
 
   if (DeclRefExpr * ref = dyn_cast<DeclRefExpr>(base)) {
     pos = new Position(ref->getLocation());
-    ptr_scope = CurScope;
-    ptr_decl = ref->getDecl();
+    scope = CurScope;
+    decl_var = scope->find_var(ref->getDecl());
   }
   else {
     ArrEx->dump();
-    cerr <<"Exception Array\n";
+    std::cerr <<"Exception Array\n";
   }
 }
 
 Access_Var::Access_Var() {
-  ptr_decl = NULL;
+  decl_var = NULL;
 }
 
 Access_Var::~Access_Var() {
 }
-void Access_Var::set_var(DeclRefExpr *d) {
-  pos = new Position(ref->getLocation());
-  ptr_scope = CurScope;
-  ptr_decl = ref->getDecl();
-}
 
-Access_Var * Access_Var::find_last_access(Decl * decl_stmt, bool iswrite) {
-  Decl_Var * decl_var = ptr_scope->find_var(decl_stmt);
+Access_Var * Access_Var::find_last_access(ValueDecl * decl_stmt, bool iswrite) {
+  Decl_Var * decl_var = scope->find_var(decl_stmt);
   if (decl_var == NULL)
     return NULL;
 
-  return decl_var->find_last_access(pos, iswrite);
+  return decl_var->find_last_access(*pos, iswrite);
 }
 
-Access_Var * Access_Var::find_next_access(Decl * decl_stmt, int iswrite) {
-  Decl_Var * decl_var = ptr_scope->find_var(decl_stmt);
+Access_Var * Access_Var::find_next_access(ValueDecl * decl_stmt, bool iswrite) {
+  Decl_Var * decl_var = scope->find_var(decl_stmt);
   if (decl_var == NULL)
     return NULL;
 
-  return decl_var->find_next_access(pos, iswrite);
+  return decl_var->find_next_access(*pos, iswrite);
 }
 
 
@@ -172,28 +167,28 @@ ScopeIR::ScopeIR() {
 
 ScopeIR::~ScopeIR() {
 
-  for (int i = 0; i < children.size(); i++)
-    delete children[i];
+  for (auto& child : children)
+    delete child;
 
-  for (int i = 0; i < decl_chain.size(); i++)
-    delete decl_chain[i];
+  for (auto& dv : decl_chain)
+    delete dv;
 
-  for (int i = 0; i < access_chain.size(); i++)
-    delete access_chain[i];
+  for (auto& av : access_chain)
+    delete av;
 
 }
 
 
-Decl_Var * ScopeIR::find_var(Decl * decl_stmt){
-  for (int i = 0; i < decl_chain.size(); i++) {
-    if (decl_chain[i]->decl_stmt == decl_stmt)
-      return decl_chain[i];
+Decl_Var * ScopeIR::find_var(ValueDecl * decl_stmt){
+  for (auto& dv : decl_chain) {
+    if (dv->decl_stmt == decl_stmt)
+      return dv;
   }
 
-  if (ptr_parent == NULL)
+  if (parent == NULL)
     return NULL;
 
-  return ptr_parent->find_var(decl_stmt);
+  return parent->find_var(decl_stmt);
 }
 
 void ScopeIR::add_child(ScopeIR * scope) {
@@ -203,14 +198,14 @@ void ScopeIR::add_child(ScopeIR * scope) {
   children.push_back(scope);
 }
 
-void ScopeIR::add_UDChain(Access_Var * acc_var) {
+void ScopeIR::addUDChain(Access_Var * acc_var) {
   if (acc_var == NULL)
     return;
 
   if (acc_var->isValid()){
     access_chain.push_back(acc_var);
   
-    Decl_Var * var = CurScope->find_var(acc_var->get_decl);
+    Decl_Var * var = acc_var->get_decl();
     var->append_access(acc_var);
   }
 }
@@ -261,49 +256,65 @@ bool ScopeIR::compareAlgebraExpr(Expr * e1, Expr * e2) {
   if (se_e1.size() != se_e2.size())
     return false;
 
-  for (int i = 0; i < se_e1.size(); i++) {
+  for (unsigned int i = 0; i < se_e1.size(); i++) {
     if (se_e1[i]->getStmtClass() != se_e2[i]->getStmtClass())
       return false;
     switch (se_e1[i]->getStmtClass()) {
-      case clang::Stmt::BinaryOperator:
-      case clang::Stmt::CompoundAssignOperator:
-	BinaryOperator * BinOp1 = cast<BinaryOperator>(se_e1[i]);
-	BinaryOperator * BinOp2 = cast<BinaryOperator>(se_e2[i]);
-	if ( BinOp1->getOpcode() != BinOp2->getOpcode())
-	  return false;
-      case clang::Stmt::UnaryOperator:
-        UnaryOperator *UnOp1 = dyn_cast<UnaryOperator>(se_e1[i])
-        UnaryOperator *UnOp2 = dyn_cast<UnaryOperator>(se_e2[i])
-	if (UnOp1->getOpcode() != UnOp2->getOpcode())
-	  return false;
-      case clang::Stmt::DeclRefExpr:
-	DeclRefExpr * DeRef1 = cast<DeclRefExpr> (se_e1[i]);
-	DeclRefExpr * DeRef2 = cast<DeclRefExpr> (se_e2[i]);
-	if (DeRef1->getDecl() != DeRef2->getDecl()) 
-	  return false;
-      case clang::Stmt::IntegerLiteral:
-        IntegerLiteral * int1 = cast<IntegerLiteral>(se_e1[i]);
-        llvm::APInt llvm_val1 = int1->getValue();
+      case Stmt::BinaryOperatorClass:
+      case Stmt::CompoundAssignOperatorClass:
+	{
+	  BinaryOperator * BinOp1 = cast<BinaryOperator>(se_e1[i]);
+	  BinaryOperator * BinOp2 = cast<BinaryOperator>(se_e2[i]);
+	  if ( BinOp1->getOpcode() != BinOp2->getOpcode())
+	    return false;
+	}
+	break;
+      case Stmt::UnaryOperatorClass:
+	{
+          UnaryOperator *UnOp1 = dyn_cast<UnaryOperator>(se_e1[i]);
+          UnaryOperator *UnOp2 = dyn_cast<UnaryOperator>(se_e2[i]);
+	  if (UnOp1->getOpcode() != UnOp2->getOpcode())
+	    return false;
+	}
+	break;
+      case Stmt::DeclRefExprClass:
+	{
+	  DeclRefExpr * DeRef1 = cast<DeclRefExpr> (se_e1[i]);
+	  DeclRefExpr * DeRef2 = cast<DeclRefExpr> (se_e2[i]);
+	  if (DeRef1->getDecl() != DeRef2->getDecl()) 
+	    return false;
+	}
+	break;
+      case Stmt::IntegerLiteralClass:
+	{
+          IntegerLiteral * int1 = cast<IntegerLiteral>(se_e1[i]);
+          llvm::APInt llvm_val1 = int1->getValue();
 
-        IntegerLiteral * int2 = cast<IntegerLiteral>(se_e2[i]);
-        llvm::APInt llvm_val2 = int2->getValue();
+          IntegerLiteral * int2 = cast<IntegerLiteral>(se_e2[i]);
+          llvm::APInt llvm_val2 = int2->getValue();
  
-	if (llvm_val1.eq(llvm_val2) == false)
-	  return false;
-      case clang::Stmt::FloatingLiteral:
-        FloatingLiteral * float1 = cast<FloatingLiteral>(se_e1[i]);
-        llvm::APFloat llvm_val1 = float1->getValue();
+	  if (llvm_val1.eq(llvm_val2) == false)
+	    return false;
+	}
+	break;
+      case Stmt::FloatingLiteralClass:
+	{
+          FloatingLiteral * float1 = cast<FloatingLiteral>(se_e1[i]);
+          llvm::APFloat llvm_val1 = float1->getValue();
 
-        FloatingLiteral * float2 = cast<FloatingLiteral>(se_e2[i]);
-        llvm::APFloat llvm_val2 = float2->getValue();
+          FloatingLiteral * float2 = cast<FloatingLiteral>(se_e2[i]);
+          llvm::APFloat llvm_val2 = float2->getValue();
 
- 	if (llvm_val1.compare(llvm_val2) != llvm::APFloatBase::cmpEqual)
-	  return false;
-
-      case clang::Stmt::ImaginaryLiteral:
-      case clang::Stmt::ParenExpr:
-      case clang::Stmt::ArraySubscriptExpr:
-      case clang::Stmt::MemberExpr:
+ 	  if (llvm_val1.compare(llvm_val2) != llvm::APFloatBase::cmpEqual)
+	    return false;
+	}
+	break;
+      case Stmt::ImaginaryLiteralClass:
+      case Stmt::ParenExprClass:
+      case Stmt::ArraySubscriptExprClass:
+      case Stmt::MemberExprClass:
+	break;
+      default:
 	break;
     }
   }
@@ -312,21 +323,22 @@ bool ScopeIR::compareAlgebraExpr(Expr * e1, Expr * e2) {
 }
 
 //Find if the Algebra expression is related to Var, it will trace the compute chain.
-bool ScopeIR::isVarRelatedExpr(Expr * e, Decl * v) {
+bool ScopeIR::isVarRelatedExpr(Expr * e, ValueDecl * v) {
   ExprSerializer se; 
   se.clear();
-  se.TraverseStmt(e1);
+  se.TraverseStmt(e);
   std::vector<Expr *> se_e = se.getOutput();
 
-  std::vector<Decl *> se_v;
-  for (int i = 0; i < se_e.size(); i++) {
-    if(DeclRefExpr * DecRef = dyn_cast<DeclRefExpr> (se_e[i])) {
-      Decl * d = DeclRef->getDecl();
+  std::vector<ValueDecl *> se_v;
+  for (unsigned int i = 0; i < se_e.size(); i++) {
+    if(DeclRefExpr * dr = dyn_cast<DeclRefExpr> (se_e[i])) {
+      ValueDecl * d = dr->getDecl();
       if (d == v)
 	return true;
       else {
 	Decl_Var *dv = find_var(d);
-	Access_Var *av = dv.find_last_access(Position pos(e->getLocation), true);
+	Position pos(e->getLocStart());
+	Access_Var *av = dv->find_last_access(pos, true);
 	if (av && isVarRelatedExpr(av->get_value(), v))
 	  return true;
       }

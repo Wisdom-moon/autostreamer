@@ -5,61 +5,58 @@
 // This code is in the public domain
 //------------------------------------------------------------------------------
 
-#include "ScopeIR.h"
+#include "ScopeIRGen.h"
+#include <iostream>
 
 
-class ScopeIRGen: public RecursiveASTVisitor<ScopeIRGen> {
-  private:
-  //TODO:If the *ptr is calculated form one base ptr, we may trace it.
-  Access_Var * create_av_expr(Expr * e) {
-    Access_Var *av = NULL;
-    if (DeclRefExpr * ref = dyn_cast<DeclRefExpr>(e)) {
-      av = new Access_Var(ref);
+//TODO:If the *ptr is calculated form one base ptr, we may trace it.
+Access_Var * ScopeIRGen::create_av_expr(Expr * e) {
+  Access_Var *av = NULL;
+  if (DeclRefExpr * ref = dyn_cast<DeclRefExpr>(e)) {
+    av = new Access_Var(ref);
+  }
+  else if (ArraySubscriptExpr * ArrEx = dyn_cast<ArraySubscriptExpr>(e)) {
+    av = new Access_Var(ArrEx);
+    Expr *base = ArrEx->getBase()->IgnoreImpCasts();
+    TraverseStmt(ArrEx->getIdx()->IgnoreImpCasts());
+    while (isa<ArraySubscriptExpr>(base)) {
+      ArraySubscriptExpr * a = dyn_cast<ArraySubscriptExpr>(base);
+      TraverseStmt(a->getIdx()->IgnoreImpCasts());
+      base = a->getBase()->IgnoreImpCasts();
     }
-    else if (ArraySubscriptExpr * ArrEx = dyn_cast<ArraySubscriptExpr>(e)) {
-      av = new Access_Var(ArrEx);
-      Expr *base = ArrEx->getBase()->IgnoreImpCasts();
-      TraverseStmt(ArrEx->getIdx()->IgnoreImpCasts());
-      while (isa<ArraySubscriptExpr>(base)) {
-        ArraySubsciptExpr * a = dyn_cast<ArraySubscriptExpr>(base);
-        TraverseStmt(a->getIdx()->IgnoreImpCasts());
-        base = a->getBase()->IgnoreImpCasts();
-      }
-    }
-    else if ((UnaryOperator *UnOp = dyn_cast<UnaryOperator>(e)) &&
-  	    UnOp->getOpcode() == UO_Deref){
-      Expr * sub_e = UnOo->getSubExpr()->IgnoreImpCasts();
-      if (DeclRefExpr * ref = dyn_cast<DeclRefExpr>(e)) {
+  }
+  else if (UnaryOperator *UnOp = dyn_cast<UnaryOperator>(e)){
+    if (UnOp->getOpcode() == UO_Deref){
+      Expr * sub_e = UnOp->getSubExpr()->IgnoreImpCasts();
+      if (DeclRefExpr * ref = dyn_cast<DeclRefExpr>(sub_e)) {
         av = new Access_Var(ref);
-    
+  
         //Create IntegerLiteral expression "0".
         llvm::APInt int_val(64, 0, true);
         QualType type = Ctx->getIntTypeForBitwidth(64, true);
-        IntegerLiteral *int_expr = new (*Ctx) IntegerLiteral(*Ctx, int_val, type, e->getLocation());
-    
+        IntegerLiteral *int_expr = new (*Ctx) IntegerLiteral(*Ctx, int_val, type, UnOp->getLocStart());
+  
         av->set_index(int_expr);
       }
       else {
         UnOp->dump();
-        cerr <<"Exception Deref Mem to create Access_Var!\n";
+        std::cerr <<"Exception Deref Mem to create Access_Var!\n";
       }
     }
-    else {
-      UnOp->dump();
-      cerr <<"Exception Expr to create Access_Var!\n";
-    }
-  
-    return av;
+  }
+  else if (isa<IntegerLiteral>(e))
+    return NULL;
+
+  if (av == NULL) {
+    e->dump();
+    std::cerr <<"Exception Expr to create Access_Var!\n";
   }
 
-  public:
-  void Initialize(ASTContext &Context) {
-    CurScope = new ScopeIR();
-    CurScope->type = 0;
-    TopScope->add_child(CurScope);
-  }
+  return av;
+}
 
-  bool VisitFunctionDecl (FunctionDecl *f) {
+
+  bool ScopeIRGen::VisitFunctionDecl (FunctionDecl *f) {
     if (f->doesThisDeclarationHaveABody()) {
       Decl_Var * f_var = new Decl_Var(f);
       CurScope->append_decl(f_var);
@@ -73,16 +70,20 @@ class ScopeIRGen: public RecursiveASTVisitor<ScopeIRGen> {
     return true;
   }
 
-  bool VisitVarDecl(VarDecl *d) {
-    Decl_var * p_var = new Decl_Var(d);
+  bool ScopeIRGen::VisitVarDecl(VarDecl *d) {
+    Decl_Var * p_var = new Decl_Var(d);
     CurScope->append_decl (p_var);
+    if (d->hasInit()) {
+          Access_Var * av = create_av_expr (d->getInit()->IgnoreImpCasts());
+	  CurScope->addUDChain(av);
+    }
     return true;
   }
 
-  bool VisitStmt(Stmt *S) {
+  bool ScopeIRGen::VisitStmt(Stmt *S) {
     if (ReturnStmt * ret = dyn_cast<ReturnStmt> (S)) {
-      ScopeIR * func = this;
-      int line = SM->getExpansionLineNumber(ret->getLocation());
+      ScopeIR * func = CurScope;
+      int line = SM->getExpansionLineNumber(ret->getLocStart());
       while (func && func->type != 1) func = func->parent;
 
       if (func && func->last_return_line < line) 
@@ -92,24 +93,25 @@ class ScopeIRGen: public RecursiveASTVisitor<ScopeIRGen> {
     return true;
   }
 
-  bool dataTraverseStmtPost (Stmt *st) {
+  bool ScopeIRGen::dataTraverseStmtPost (Stmt *st) {
     switch(st->getStmtClass()) {
       case clang::Stmt::CompoundStmtClass:
 	if (CurScope->parent->type == 1)
 	  CurScope = CurScope->parent;
-      case clang::Stmt::ForStmtClass: ;
-      case clang::Stmt::IfStmtClass: ;
-      case clang::Stmt::WhileStmtClass: ;
-      case clang::Stmt::DoStmtClass: ;
-      case clang::Stmt::SwitchStmtClass: ;
-      case clang::Stmt::SwitchCaseClass: ;
-      case clang::Stmt::OMPParallelForDirectiveClass: ;
-      case clang::Stmt::CXXCatchStmtClass: ;
-      case clang::Stmt::CXXForRangeStmtClass: ;
-      case clang::Stmt::CXXTryStmtClass: ;
-      case clang::Stmt::SEHExceptStmtClass: ;
-      case clang::Stmt::SEHFinallyStmtClass: ;
-      case clang::Stmt::CapturedStmtClass: ;
+	CurScope = CurScope->parent;
+	break;
+      case clang::Stmt::ForStmtClass: 
+      case clang::Stmt::IfStmtClass: 
+      case clang::Stmt::WhileStmtClass: 
+      case clang::Stmt::DoStmtClass: 
+      case clang::Stmt::SwitchStmtClass:
+      case clang::Stmt::OMPParallelForDirectiveClass: 
+      case clang::Stmt::CXXCatchStmtClass: 
+      case clang::Stmt::CXXForRangeStmtClass: 
+      case clang::Stmt::CXXTryStmtClass: 
+      case clang::Stmt::SEHExceptStmtClass: 
+      case clang::Stmt::SEHFinallyStmtClass: 
+      case clang::Stmt::CapturedStmtClass: 
       case clang::Stmt::NoStmtClass:
 	CurScope = CurScope->parent;
 	break;
@@ -119,7 +121,7 @@ class ScopeIRGen: public RecursiveASTVisitor<ScopeIRGen> {
   return true;
   }
 
-  bool dataTraverseStmtPre (Stmt *st) {
+  bool ScopeIRGen::dataTraverseStmtPre (Stmt *st) {
     ScopeIR * p_scope = new ScopeIR();
     switch(st->getStmtClass()) {
       case clang::Stmt::CompoundStmtClass:
@@ -144,10 +146,10 @@ class ScopeIRGen: public RecursiveASTVisitor<ScopeIRGen> {
 	p_scope->type = 7; 
 	p_scope->condition = st;
 	break;
-      case clang::Stmt::SwitchCaseClass: ;
-	p_scope->type = 8; 
-	p_scope->condition = st;
-	break;
+//      case clang::Stmt::SwitchCaseClass: ;
+//	p_scope->type = 8; 
+//	p_scope->condition = st;
+//	break;
       case clang::Stmt::OMPParallelForDirectiveClass: ;
 	p_scope->type = 9; break;
       case clang::Stmt::CXXCatchStmtClass: ;
@@ -180,16 +182,16 @@ class ScopeIRGen: public RecursiveASTVisitor<ScopeIRGen> {
 
   //Construct Use-Def Chains.
   //And add scope for branch statements.
-  bool TraverseStmt(Stmt *S) {
+  bool ScopeIRGen::TraverseStmt(Stmt *S) {
     if (!S)
       return true;
   
     switch (S->getStmtClass()) {
-      case clang::Stmt::BinaryOperator:
-        BinaryOperator *BinOp = dyn_cast<BinaryOperator>(S) 
-        //Handle all Assign write operation here.
-        switch (BinOp->getOpcode() ) {
-          case BO_Assign:
+      case clang::Stmt::BinaryOperatorClass:
+	{
+          BinaryOperator *BinOp = dyn_cast<BinaryOperator>(S); 
+          //Handle all Assign write operation here.
+          if (BinOp->getOpcode() == BO_Assign) {
             Expr * lhs = BinOp->getLHS()->IgnoreImpCasts();
             Access_Var * av = create_av_expr (lhs);
             if (av) {
@@ -197,109 +199,127 @@ class ScopeIRGen: public RecursiveASTVisitor<ScopeIRGen> {
               CurScope->addUDChain(av);
               return TraverseStmt(BinOp->getRHS());
             }
-            break;
-        }
+          }
+	}
 	break;
-      case clang::Stmt::CompoundAssignOperator:
-        CompoundAssignOperator *BinOp = dyn_cast<CompoundAssignOperator>(S) 
-        switch (BinOp->getOpcode() ) {
-          case BO_MulAssign:
-          case BO_DivAssign:
-          case BO_AddAssign:
-          case BO_SubAssign:
-            Expr * lhs = BinOp->getLHS()->IgnoreImpCasts();
-            Access_Var * av = create_av_expr (lhs);
-            if (av) {
-              av->set_value (BinOp);
-              CurScope->addUDChain(av);
-              return TraverseStmt(BinOp->getRHS());
-            }
-            break;
-        }
-      case clang::Stmt::UnaryOperator:
-        UnaryOperator *UnOp = dyn_cast<UnaryOperator>(S)
-        switch (UnOp->getOpcode()) {
-          //Handle all unary write operation here.
-          case UO_PostInc:
-          case UO_PostDes:
-          case UO_PreInc:
-          case UO_PreDec:
-            Expr * e = UnOp->getSubExpr()->IgnoreImpCasts();
-            Access_Var * av = create_av_expr (e);
-            if (av) {
-              av->set_value (UnOp);
-              CurScope->addUDChain(av);
-              return true;
-            }
-            break;
+      case clang::Stmt::CompoundAssignOperatorClass:
+	{
+          CompoundAssignOperator *BinOp = dyn_cast<CompoundAssignOperator>(S);
+          switch (BinOp->getOpcode()) {
+            case BO_MulAssign:
+            case BO_DivAssign:
+            case BO_AddAssign:
+            case BO_SubAssign:
+	      {
+                Expr * lhs = BinOp->getLHS()->IgnoreImpCasts();
+                Access_Var * av = create_av_expr (lhs);
+                if (av) {
+                  av->set_value (BinOp);
+                  CurScope->addUDChain(av);
+                  return TraverseStmt(BinOp->getRHS());
+                }
+	      }
+              break;
+	    default:
+	      break;
+          }
+	}
+	break;
+      case clang::Stmt::UnaryOperatorClass:
+	{
+          UnaryOperator *UnOp = dyn_cast<UnaryOperator>(S);
+          switch (UnOp->getOpcode()) {
+            //Handle all unary write operation here.
+            case UO_PostInc:
+            case UO_PostDec:
+            case UO_PreInc:
+            case UO_PreDec:
+	      {
+                Expr * e = UnOp->getSubExpr()->IgnoreImpCasts();
+                Access_Var * av = create_av_expr (e);
+                if (av) {
+                  av->set_value (UnOp);
+                  CurScope->addUDChain(av);
+                  return true;
+                }
+	      }
+              break;
 
-          // *ptr, read;
-          // TODO: *++ptr, *(exp), *arr[], 
-          case UO_Deref:
-            Access_Var * av = create_av_expr(UnOp);
-            if (av) {
-              CurScope->addUDChain(av);
-              return true;
-            }
-            break;
-          case UO_AddrOf:
-          case UO_Plus:
-          case UO_Minus:
-            break;
-        }
+            // *ptr, read;
+            // TODO: *++ptr, *(exp), *arr[], 
+            case UO_Deref:
+	      {
+                Access_Var * av = create_av_expr(UnOp);
+                if (av) {
+                  CurScope->addUDChain(av);
+                  return true;
+                }
+	      }
+              break;
+            case UO_AddrOf:
+            case UO_Plus:
+            case UO_Minus:
+              break;
+	    default:
+	      break;
+          }
+	}
         break;
       //TODO: Struct member read.
-      case MemberExpr:
-        MemberExpr * MemEx = dyn_cast<MemberExpr>(S) 
-        return RecursiveASTVisitor<MyASTVisitor>::TraverseStmt(S);
+      case Stmt::MemberExprClass:
+	{
+          //MemberExpr * MemEx = dyn_cast<MemberExpr>(S); 
+          return RecursiveASTVisitor<ScopeIRGen>::TraverseStmt(S);
+	}
         break;
       //Array[][] Read.
-      case ArraySubscriptExpr:
-      case DeclRefExpr:
-        Access_Var * av = create_av_expr (S);
-        if (av) {
-          CurScope->addUDChain(av);
-          return true;
-        }
+      case Stmt::ArraySubscriptExprClass:
+      case Stmt::DeclRefExprClass:
+	{
+          Access_Var * av = create_av_expr (cast<Expr>(S));
+          if (av) {
+            CurScope->addUDChain(av);
+            return true;
+          }
+	}
         break;
       //Create scope of true/false branch.
-      case IfStmt:
-	IfStmt * ifs = cast<IfStmt>(S);
-	Stmt * e = ifs->getCond();
-  	TraverseStmt(e);
-	e = ifs->getInit();
-  	TraverseStmt(e);
-
-	e = ifs->getThen();
-	if (e) {
-          ScopeIR * true_scope = new ScopeIR();
-	  true_scope->type = 15;
-          true_scope->s_pos = new Position(e->getLocStart());
-          true_scope->e_pos = new Position(e->getLocEnd());
-          CurScope->add_child(true_scope);
-          CurScope = true_scope;
-	  TraverseStmt(e);
-	  CurScope = CurScope->parent;
-	}
-
-	e = ifs->getElse();
-	if (e) {
-          ScopeIR * false_scope = new ScopeIR();
-	  true_scope->type = 16;
-          false_scope->s_pos = new Position(e->getLocStart());
-          false_scope->e_pos = new Position(e->getLocEnd());
-          CurScope->add_child(false_scope);
-          CurScope = false_scope;
+      case Stmt::IfStmtClass:
+	{
+	  IfStmt * ifs = cast<IfStmt>(S);
+	  Stmt * e = ifs->getCond();
   	  TraverseStmt(e);
-  	  CurScope = CurScope->parent;
-	}
+	  e = ifs->getInit();
+  	  TraverseStmt(e);
 
+	  e = ifs->getThen();
+	  if (e) {
+            ScopeIR * true_scope = new ScopeIR();
+	    true_scope->type = 15;
+            true_scope->s_pos = new Position(e->getLocStart());
+            true_scope->e_pos = new Position(e->getLocEnd());
+            CurScope->add_child(true_scope);
+            CurScope = true_scope;
+	    TraverseStmt(e);
+	    CurScope = CurScope->parent;
+	  }
+
+	  e = ifs->getElse();
+	  if (e) {
+            ScopeIR * false_scope = new ScopeIR();
+	    false_scope->type = 16;
+            false_scope->s_pos = new Position(e->getLocStart());
+            false_scope->e_pos = new Position(e->getLocEnd());
+            CurScope->add_child(false_scope);
+            CurScope = false_scope;
+  	    TraverseStmt(e);
+  	    CurScope = CurScope->parent;
+	  }
+	}
 	return true;
       default:
 	break;
     }
 
-    return RecursiveASTVisitor<MyASTVisitor>::TraverseStmt(S);
+    return RecursiveASTVisitor<ScopeIRGen>::TraverseStmt(S);
   }
-
-}

@@ -4,9 +4,15 @@
 // Peng Zhang(pengzhang_nudt@sina.com)
 // This code is in the public domain
 //------------------------------------------------------------------------------
+#include "PassManager.h"
 
 
 static llvm::cl::OptionCategory ToolingSampleCategory("Tooling Sample");
+
+ScopeIR * TopScope;
+SourceManager *SM;
+ScopeIR * CurScope;
+ASTContext *Ctx;
 
 int main(int argc, const char **argv) {
   CommonOptionsParser op(argc, argv, ToolingSampleCategory);
