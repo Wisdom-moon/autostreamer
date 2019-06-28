@@ -382,7 +382,7 @@
       new_scope.process_state = cur_scope.process_state;
 
     if (SM->isWrittenInMainFile(st->getLocStart()) && f_info.last_include < 0)
-      f_info.last_include = SM->getExpansionLineNumber(st->getLocStart());
+      f_info.last_include = SM->getExpansionLineNumber(st->getLocStart()) - 2;
 
     if (isa<CompoundStmt>(st) || isa<WhileStmt>(st) || isa<CXXCatchStmt>(st)
        || isa<CXXForRangeStmt>(st) || isa<CXXTryStmt>(st) || isa<DoStmt>(st)

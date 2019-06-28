@@ -753,14 +753,18 @@ while (!Infile.eof()) {
       if ( i > 0)
 	parameters_str += ", ";
       std::string decl_str = fix_decls[i].type_name;
+      std::string::size_type idx = decl_str.find("*");
       decl_str += " ";
-      decl_str += fix_decls[i].var_name;
+      if (idx == std::string::npos)
+        decl_str += fix_decls[i].var_name;
+      else 
+	decl_str.insert(idx+1, fix_decls[i].var_name);
       parameters_str += decl_str;
     }
-    parameters_str += ", int length";
+    parameters_str += ", int length, int stream_id";
 
     //Add kernel function decl.
-    File << "__global__ void my_kernel\n"
+    File << "__global__ void my_kernel"
 	 <<" ( "<<parameters_str;
     File <<")\n{\n\n";
 
@@ -774,12 +778,14 @@ while (!Infile.eof()) {
     }
 
     if (is_def == 0)
-      File << "int "<<loop_var<<" = blockDim.x * blockIdx.x + threadIdx.x;\n";
+      File << "  int "<<loop_var<<" = blockDim.x * blockIdx.x + threadIdx.x;\n";
     else
-      File <<loop_var<<" = blockDim.x * blockIdx.x + threadIdx.x;\n";
+      File <<"  "<<loop_var<<" = blockDim.x * blockIdx.x + threadIdx.x;\n";
 
-    File <<"if ("<<loop_var<<" >= length"<<")\n"
-	 << "  return;\n";
+    File <<"  "<<"if ("<<loop_var<<" >= length"<<")\n"
+	 <<"  "<< "  return;\n";
+
+    File <<"  "<<loop_var<<" += length * stream_id;\n";
   }
   if (exit_loop == LineNo) {
     File << Line <<"\n}\n\n";
@@ -816,11 +822,10 @@ void CodeGen::generateCUDAFile() {
     std::getline(Infile, Line);
 
   //Add CUDA include file;
-  if (LineNo == include_insert_site) {
-    File << "#include <cuda.h>\n";
-    File << "#include <cuda_runtime_api.h>\n\n\n";
-  }
   if (LineNo == cuda_kernel_site) {
+    File << "#include <cuda.h>\n";
+    File << "#include <cuda_runtime_api.h>\n\n";
+    File << "#define DECOMP\n\n";
     File << kernel_code;
   }
 
@@ -843,9 +848,11 @@ void CodeGen::generateCUDAFile() {
          <<Start<<"  cudaStreamCreate(&(streams[i]));\n"
          <<Start<<"}\n\n"
 	 <<Start<<"cudaEvent_t start_event, stop_event;\n"
+	 <<Start<<"float time_elapsed;\n"
 	 <<Start<<"int eventflags = cudaEventBlockingSync;\n"
 	 <<Start<<"cudaEventCreateWithFlags(&start_event, eventflags);\n"
-	 <<Start<<"cudaEventCreateWithFlags(&stop_event, eventflags);\n";
+	 <<Start<<"cudaEventCreateWithFlags(&stop_event, eventflags);\n"
+	 <<Start <<"printf(\"\%d\\t\%d\\t\%d\\t\", " <<length_var_name<<", 1, nstreams);\n";
   }
   if (create_mem_site == LineNo) {
     std::string Start;
@@ -859,8 +866,17 @@ void CodeGen::generateCUDAFile() {
     }
     //Add hStreams buf create code
     for (unsigned i = 0; i < mem_bufs.size(); i++) {
-      File <<Start<<mem_bufs[i].type_name<<" d_"<<mem_bufs[i].buf_name<<";\n"
-	   <<Start<<"cudaMalloc((void **)&d_"<<mem_bufs[i].buf_name<<", "
+      std::string decl_str = mem_bufs[i].type_name;
+      std::string decl_name = "d_";
+      decl_name += mem_bufs[i].buf_name;
+      std::string::size_type idx = decl_str.find("*");
+      if (idx == std::string::npos)
+	decl_str += decl_name;
+      else
+	decl_str.insert(idx+1, decl_name);
+
+      File <<Start<<decl_str<<";\n"
+	   <<Start<<"cudaMalloc((void **)&"<<decl_name<<", "
 	   <<mem_bufs[i].size_string<<");\n";
     }
   }
@@ -883,45 +899,78 @@ void CodeGen::generateCUDAFile() {
 
     //Add hStreams multStreams variables decl
     File <<Start<<"int threadsPerBlock = 256;\n";
+    File <<Start<<"cudaEventRecord(start_event, 0);\n";
 
     //Add hStreams kernel arguments set code
     ostringstream parameters_os;
     for (unsigned i = 0; i < fix_decls.size(); i++) {
       if ( i > 0)
 	parameters_os << ", ";
-
       std::string::size_type idx = fix_decls[i].type_name.find("*");
-
-      if (idx != std::string::npos)
-        parameters_os << "d_"<<fix_decls[i].var_name<<"+i*"<<length_var_name<<"/nstreams";
-      else
+      if (idx == std::string::npos)
         parameters_os <<fix_decls[i].var_name;
+      else
+        parameters_os <<"d_"<<fix_decls[i].var_name;
     }
-    parameters_os << ", "<<length_var_name<<"/nstreams";
+    parameters_os << ", "<<length_var_name<<"/nstreams"<<", i";
 
     //Use idx_subtask is to avoid be the same to original variable name
-    File <<Start<<"for (int i = 0; i < nstreams; i++)\n"
-	 <<Start<<"{\n"
-	 <<Start<<"int blocksPerGrid = ("<<length_var_name<<"+threadsPerBlock - 1)/(nstreams*threadsPerBlock);\n";
+    File <<Start<<"int blocksPerGrid = ("<<length_var_name<<"+threadsPerBlock - 1)/(nstreams*threadsPerBlock);\n";
 
+    File <<Start<<"for (int i = 0; i < nstreams; i++)\n"
+	 <<Start<<"{\n";
     for (unsigned i = 0;i < h2d_xfers.size(); i++) {
-      File <<Start<<"  cudaMemcpyAsync(d_"
-	   <<h2d_xfers[i].buf_name<<"+i*"<<length_var_name<<"/nstreams, "
-	   <<h2d_xfers[i].buf_name<<"+i*"<<length_var_name<<"/nstreams, "
+      File <<Start<<"  cudaMemcpyAsync(&d_"
+	   <<h2d_xfers[i].buf_name<<"[i*"<<length_var_name<<"/nstreams]";
+      for (unsigned j = 1; j < h2d_xfers[i].dim; j++)
+	File <<"[0]";
+      File <<", &"
+	   <<h2d_xfers[i].buf_name<<"[i*"<<length_var_name<<"/nstreams]";
+      for (unsigned j = 1; j < h2d_xfers[i].dim; j++)
+	File <<"[0]";
+      File <<", "
 	   <<h2d_xfers[i].size_string<<"/nstreams, cudaMemcpyHostToDevice, streams[i]);\n";
     }
+    File <<Start<<"}\n";
+    File <<Start<<"#ifdef DECOMP\n"
+  	 <<Start<<"cudaEventRecord(stop_event, 0);\n"
+  	 <<Start<<"cudaEventSynchronize(stop_event);\n"
+  	 <<Start<<"cudaEventElapsedTime(&time_elapsed, start_event, stop_event);\n"
+  	 <<Start<<"printf(\"\%f\\t\", time_elapsed);\n"
+  	 <<Start<<"cudaEventRecord(start_event, 0);\n"
+  	 <<Start<<"#endif\n";
 
+    File <<Start<<"for (int i = 0; i < nstreams; i++)\n"
+	 <<Start<<"{\n";
     File <<Start<<"  my_kernel<<<blocksPerGrid, threadsPerBlock,0, streams[i]>>>("<<parameters_os.str()<<");\n";
+    File <<Start<<"}\n";
+    File <<Start<<"#ifdef DECOMP\n"
+  	 <<Start<<"cudaEventRecord(stop_event, 0);\n"
+  	 <<Start<<"cudaEventSynchronize(stop_event);\n"
+  	 <<Start<<"cudaEventElapsedTime(&time_elapsed, start_event, stop_event);\n"
+  	 <<Start<<"printf(\"\%f\\t\", time_elapsed);\n"
+  	 <<Start<<"cudaEventRecord(start_event, 0);\n"
+  	 <<Start<<"#endif\n";
 
+    File <<Start<<"for (int i = 0; i < nstreams; i++)\n"
+	 <<Start<<"{\n";
     for (unsigned i = 0;i < d2h_xfers.size(); i++) {
-      File <<Start<<"  cudaMemcpyAsync("
-	   <<d2h_xfers[i].buf_name<<"+i*"<<length_var_name<<"/nstreams, "
-	   <<"d_"<<d2h_xfers[i].buf_name<<"+i*"<<length_var_name<<"/nstreams, "
+      File <<Start<<"  cudaMemcpyAsync(&"
+	   <<d2h_xfers[i].buf_name<<"[i*"<<length_var_name<<"/nstreams]";
+      for (unsigned j = 1; j < d2h_xfers[i].dim; j++)
+	File <<"[0]";
+      File <<", "
+	   <<"&d_"<<d2h_xfers[i].buf_name<<"[i*"<<length_var_name<<"/nstreams]";
+      for (unsigned j = 1; j < d2h_xfers[i].dim; j++)
+	File <<"[0]";
+      File <<", "
 	   <<d2h_xfers[i].size_string<<"/nstreams, cudaMemcpyDeviceToHost, streams[i]);\n";
     }
     File <<Start<<"}\n";
 
-    File <<Start<<"cudaEventRecord(stop_event, 0);\ncudaEventSynchronize(stop_event);\n";
+    File <<Start<<"cudaEventRecord(stop_event, 0);\ncudaEventSynchronize(stop_event);\n"
+	 <<Start<<"cudaEventElapsedTime(&time_elapsed, start_event, stop_event);\n"
+	 <<Start<<"printf(\"\%f\\n\", time_elapsed);\n";
 
     for (auto &mem_xfer : post_xfers) {
       File <<Start<<"cudaMemcpyAsync("

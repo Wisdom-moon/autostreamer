@@ -79,9 +79,9 @@ void kernel_bicg(int m, int n,
 {
   int i, j;
 
-#pragma scop
   for (i = 0; i < _PB_M; i++)
     s[i] = 0;
+#pragma omp parallel for private(i, j)
   for (i = 0; i < _PB_N; i++)
     {
       q[i] = SCALAR_VAL(0.0);
@@ -91,7 +91,6 @@ void kernel_bicg(int m, int n,
 	  q[i] = q[i] + A[i][j] * p[j];
 	}
     }
-#pragma endscop
 
 }
 
