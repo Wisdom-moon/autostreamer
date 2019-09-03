@@ -1,6 +1,4 @@
-#include <hStreams_source.h>
-#include <hStreams_app_api.h>
-#include <intel-coi/common/COIMacros_common.h>
+#include "set_env.h"
 /**
  * This version is stamped on May 10, 2016
  *
@@ -57,7 +55,8 @@ void init_array(int ni, int nj, int nk, int nl,
    Can be used also to check the correctness of the output. */
 static
 void print_array(int ni, int nl,
-		 DATA_TYPE POLYBENCH_2D(D,NI,NL,ni,nl))
+		 DATA_TYPE POLYBENCH_2D(D,NI,NL,ni,nl),
+		 DATA_TYPE POLYBENCH_2D(D_Ref,NI,NL,ni,nl))
 {
   int i, j;
 
@@ -65,11 +64,46 @@ void print_array(int ni, int nl,
   POLYBENCH_DUMP_BEGIN("D");
   for (i = 0; i < ni; i++)
     for (j = 0; j < nl; j++) {
-	if ((i * ni + j) % 20 == 0) fprintf (POLYBENCH_DUMP_TARGET, "\n");
-	fprintf (POLYBENCH_DUMP_TARGET, DATA_PRINTF_MODIFIER, D[i][j]);
+      if (abs(D[i][j] - D_Ref[i][j])>1.0e-5)
+	printf("Verify Failed at D[%d][%d] = Dev %f, Ref %f\n", i, j, D[i][j], D_Ref[i][j]);
+//	if ((i * ni + j) % 20 == 0) fprintf (POLYBENCH_DUMP_TARGET, "\n");
+//	fprintf (POLYBENCH_DUMP_TARGET, DATA_PRINTF_MODIFIER, D[i][j]);
     }
   POLYBENCH_DUMP_END("D");
   POLYBENCH_DUMP_FINISH;
+}
+
+/* Main computational kernel. The whole function will be timed,
+   including the call and return. */
+static
+void Golden_kernel_2mm(int ni, int nj, int nk, int nl,
+		DATA_TYPE alpha,
+		DATA_TYPE beta,
+		DATA_TYPE POLYBENCH_2D(tmp,NI,NJ,ni,nj),
+		DATA_TYPE POLYBENCH_2D(A,NI,NK,ni,nk),
+		DATA_TYPE POLYBENCH_2D(B,NK,NJ,nk,nj),
+		DATA_TYPE POLYBENCH_2D(C,NJ,NL,nj,nl),
+		DATA_TYPE POLYBENCH_2D(D,NI,NL,ni,nl))
+{
+  int i, j, k;
+
+  /* D := alpha*A*B*C + beta*D */
+  for (i = 0; i < _PB_NI; i++)
+    for (j = 0; j < _PB_NJ; j++)
+      {
+	tmp[i][j] = SCALAR_VAL(0.0);
+	for (k = 0; k < _PB_NK; ++k)
+	  tmp[i][j] += alpha * A[i][k] * B[k][j];
+      }
+#pragma omp parallel for private(i, j, beta)
+  for (i = 0; i < _PB_NI; i++)
+    for (j = 0; j < _PB_NL; j++)
+      {
+	D[i][j] *= beta;
+	for (k = 0; k < _PB_NJ; ++k)
+	  D[i][j] += tmp[i][k] * C[k][j];
+      }
+
 }
 
 
@@ -85,30 +119,14 @@ void kernel_2mm(int ni, int nj, int nk, int nl,
 		DATA_TYPE POLYBENCH_2D(C,NJ,NL,nj,nl),
 		DATA_TYPE POLYBENCH_2D(D,NI,NL,ni,nl))
 {
-  uint32_t logical_streams_per_place= 1;
-  uint32_t places_per_domain = 2;
-  HSTR_OPTIONS hstreams_options;
+  read_cl_file();
+  cl_initialization();
+  cl_load_prog();
 
-  hStreams_GetCurrentOptions(&hstreams_options, sizeof(hstreams_options));
-  hstreams_options.verbose = 0;
-  hstreams_options.phys_domains_limit = 256;
-  char *libNames[20] = {NULL,NULL};
-  unsigned int libNameCnt = 0;
-  libNames[libNameCnt++] = "kernel.so";
-  hstreams_options.libNames = libNames;
-  hstreams_options.libNameCnt = (uint16_t)libNameCnt;
-  hStreams_SetOptions(&hstreams_options);
-
-  int iret = hStreams_app_init(places_per_domain, logical_streams_per_place);
-  if( iret != 0 )
-  {
-    printf("hstreams_app_init failed!\n");
-    exit(-1);
-  }
-
-  (hStreams_app_create_buf((double (*)[1200])C, (((nj)-1)+ 1)* sizeof (double [1200])));
-  (hStreams_app_create_buf((double (*)[1200])D, (((ni)-1)+ 1)* sizeof (double [1200])));
-  (hStreams_app_create_buf((double (*)[900])tmp, (((ni)-1)+ 1)* sizeof (double [900])));
+  printf("%d\t%d\t%d\t", (((ni)-1)-0 + 1), 1, tasks);
+  cl_mem C_mem_obj = clCreateBuffer(clGPUContext, CL_MEM_READ_WRITE, (((nj)-1)+ 1)* sizeof (double [1200]), NULL, NULL);
+  cl_mem D_mem_obj = clCreateBuffer(clGPUContext, CL_MEM_READ_WRITE, (((ni)-1)+ 1)* sizeof (double [1200]), NULL, NULL);
+  cl_mem tmp_mem_obj = clCreateBuffer(clGPUContext, CL_MEM_READ_WRITE, (((ni)-1)+ 1)* sizeof (double [900]), NULL, NULL);
   int i, j, k;
 
   /* D := alpha*A*B*C + beta*D */
@@ -119,43 +137,31 @@ void kernel_2mm(int ni, int nj, int nk, int nl,
 	for (k = 0; k < _PB_NK; ++k)
 	  tmp[i][j] += alpha * A[i][k] * B[k][j];
       }
-(hStreams_app_xfer_memory((double (*)[1200])C, (double (*)[1200])C ,(((nj)-1)+ 1)* sizeof (double [1200]), 0, HSTR_SRC_TO_SINK, NULL));
-int sub_blocks = (((ni)-1)-0 + 1)/ 4;
-int remain_index = (((ni)-1)-0 + 1)% 4;
-int start_index = 0;
-int end_index = 0;
-uint64_t args[9];
-args[2] = (uint64_t) ni;
-args[3] = (uint64_t) nl;
-args[4] = (uint64_t) *((uint64_t *) (&beta));
-args[5] = (uint64_t) nj;
-args[6] = (uint64_t) D;
-args[7] = (uint64_t) tmp;
-args[8] = (uint64_t) C;
-hStreams_ThreadSynchronize();
-start_index = 0;
-for (int idx_subtask = 0; idx_subtask < 4; idx_subtask++)
+errcode = clEnqueueWriteBuffer(clCommandQue[0], C_mem_obj, CL_TRUE, 0,
+(((nj)-1)+ 1)* sizeof (double [1200]), 
+C, 0, NULL, NULL);
+size_t localThreads[1] = {8};
+clSetKernelArg(clKernel, 0, sizeof(int), &ni);
+clSetKernelArg(clKernel, 1, sizeof(int), &nl);
+clSetKernelArg(clKernel, 2, sizeof(double), &beta);
+clSetKernelArg(clKernel, 3, sizeof(int), &nj);
+clSetKernelArg(clKernel, 4, sizeof(cl_mem), (void *) &D_mem_obj);
+clSetKernelArg(clKernel, 5, sizeof(cl_mem), (void *) &tmp_mem_obj);
+clSetKernelArg(clKernel, 6, sizeof(cl_mem), (void *) &C_mem_obj);
+DeltaT();
+for (int i = 0; i < tasks; i++)
 {
-  args[0] = (uint64_t) start_index;
-  end_index = start_index + sub_blocks;
-  if (idx_subtask < remain_index)
-    end_index ++;
-  args[1] = (uint64_t) end_index;
-  (hStreams_app_xfer_memory(&D[start_index][0], &D[start_index][0], (end_index - start_index) * sizeof (double [1200]), idx_subtask % 2, HSTR_SRC_TO_SINK, NULL));
-  (hStreams_app_xfer_memory(&tmp[start_index][0], &tmp[start_index][0], (end_index - start_index) * sizeof (double [900]), idx_subtask % 2, HSTR_SRC_TO_SINK, NULL));
-  (hStreams_EnqueueCompute(
-			idx_subtask % 2,
-			"kernel",
-			6,
-			3,
-			args,
-			NULL,NULL,0));
-  (hStreams_app_xfer_memory(&D[start_index][0], &D[start_index][0], (end_index - start_index) * sizeof (double [1200]), idx_subtask % 2, HSTR_SINK_TO_SRC, NULL));
-  start_index = end_index;
+  size_t globalOffset[1] = {i*(((ni)-1)-0 + 1)/tasks+0};
+  size_t globalThreads[1] = {(((ni)-1)-0 + 1)/tasks};
+  clEnqueueWriteBuffer(clCommandQue[i], D_mem_obj, CL_FALSE, i*(((ni)-1)+ 1)* sizeof (double [1200])/tasks, (((ni)-1)+ 1)* sizeof (double [1200])/tasks, &D[i*(((ni)-1)-0 + 1)/tasks][0], 0, NULL, NULL);
+  clEnqueueWriteBuffer(clCommandQue[i], tmp_mem_obj, CL_FALSE, i*(((ni)-1)+ 1)* sizeof (double [900])/tasks, (((ni)-1)+ 1)* sizeof (double [900])/tasks, &tmp[i*(((ni)-1)-0 + 1)/tasks][0], 0, NULL, NULL);
+  clEnqueueNDRangeKernel(clCommandQue[i], clKernel, 1, globalOffset, globalThreads, localThreads, 0, NULL, NULL);
+  clEnqueueReadBuffer(clCommandQue[i], D_mem_obj, CL_FALSE, i*(((ni)-1)+ 1)* sizeof (double [1200])/tasks, (((ni)-1)+ 1)* sizeof (double [1200])/tasks, &D[i*(((ni)-1)-0 + 1)/tasks][0], 0, NULL, NULL);
 }
-hStreams_ThreadSynchronize();
+for (int i = 0; i < tasks; i++)
+  clFinish(clCommandQue[i]);
+printf("%f\n", DeltaT());
 
-hStreams_app_fini();
 }
 
 
@@ -175,6 +181,7 @@ int main(int argc, char** argv)
   POLYBENCH_2D_ARRAY_DECL(B,DATA_TYPE,NK,NJ,nk,nj);
   POLYBENCH_2D_ARRAY_DECL(C,DATA_TYPE,NJ,NL,nj,nl);
   POLYBENCH_2D_ARRAY_DECL(D,DATA_TYPE,NI,NL,ni,nl);
+  POLYBENCH_2D_ARRAY_DECL(D_Ref,DATA_TYPE,NI,NL,ni,nl);
 
   /* Initialize array(s). */
   init_array (ni, nj, nk, nl, &alpha, &beta,
@@ -182,6 +189,13 @@ int main(int argc, char** argv)
 	      POLYBENCH_ARRAY(B),
 	      POLYBENCH_ARRAY(C),
 	      POLYBENCH_ARRAY(D));
+
+  /* Initialize array(s). */
+  init_array (ni, nj, nk, nl, &alpha, &beta,
+	      POLYBENCH_ARRAY(A),
+	      POLYBENCH_ARRAY(B),
+	      POLYBENCH_ARRAY(C),
+	      POLYBENCH_ARRAY(D_Ref));
 
   /* Start timer. */
   polybench_start_instruments;
@@ -195,13 +209,20 @@ int main(int argc, char** argv)
 	      POLYBENCH_ARRAY(C),
 	      POLYBENCH_ARRAY(D));
 
+  Golden_kernel_2mm (ni, nj, nk, nl,
+	      alpha, beta,
+	      POLYBENCH_ARRAY(tmp),
+	      POLYBENCH_ARRAY(A),
+	      POLYBENCH_ARRAY(B),
+	      POLYBENCH_ARRAY(C),
+	      POLYBENCH_ARRAY(D_Ref));
   /* Stop and print timer. */
   polybench_stop_instruments;
   polybench_print_instruments;
 
   /* Prevent dead-code elimination. All live-out data must be printed
      by the function call in argument. */
-  polybench_prevent_dce(print_array(ni, nl,  POLYBENCH_ARRAY(D)));
+  polybench_prevent_dce(print_array(ni, nl, POLYBENCH_ARRAY(D), POLYBENCH_ARRAY(D_Ref)));
 
   /* Be clean. */
   POLYBENCH_FREE_ARRAY(tmp);

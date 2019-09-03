@@ -122,7 +122,7 @@ bool LoopInfo::isParallelizable() {
   parallelizable= 1;
 
   //If the index of array is not loop inductive or is a scalar, then var only be read or has been initialized in loop, otherwise will have WAW/RAW/WAR dependence.
-  //Else is var is loop indective, which means var is memory access and with an index.
+  //Else is var is loop inductive, which means var is memory access and with an index.
     //If var has only one index, there are no dependence between loop iterations.
     //Else if var has two or more indices, then var only be read or we are sure these indices are always not equal in the range of loop.
       //TODO:Right now we do not consider the second condition.

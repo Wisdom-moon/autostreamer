@@ -85,6 +85,7 @@ void kernel_2mm(int ni, int nj, int nk, int nl,
   int i, j, k;
 
   /* D := alpha*A*B*C + beta*D */
+#pragma omp parallel for private(i, j, alpha)
   for (i = 0; i < _PB_NI; i++)
     for (j = 0; j < _PB_NJ; j++)
       {

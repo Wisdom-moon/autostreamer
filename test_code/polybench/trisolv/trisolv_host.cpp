@@ -1,6 +1,4 @@
-#include <hStreams_source.h>
-#include <hStreams_app_api.h>
-#include <intel-coi/common/COIMacros_common.h>
+#include "set_env.h"
 /**
  * This version is stamped on May 10, 2016
  *
@@ -71,66 +69,41 @@ void kernel_trisolv(int n,
 		    DATA_TYPE POLYBENCH_1D(x,N,n),
 		    DATA_TYPE POLYBENCH_1D(b,N,n))
 {
-  uint32_t logical_streams_per_place= 1;
-  uint32_t places_per_domain = 2;
-  HSTR_OPTIONS hstreams_options;
+  read_cl_file();
+  cl_initialization();
+  cl_load_prog();
 
-  hStreams_GetCurrentOptions(&hstreams_options, sizeof(hstreams_options));
-  hstreams_options.verbose = 0;
-  hstreams_options.phys_domains_limit = 256;
-  char *libNames[20] = {NULL,NULL};
-  unsigned int libNameCnt = 0;
-  libNames[libNameCnt++] = "kernel.so";
-  hstreams_options.libNames = libNames;
-  hstreams_options.libNameCnt = (uint16_t)libNameCnt;
-  hStreams_SetOptions(&hstreams_options);
-
-  int iret = hStreams_app_init(places_per_domain, logical_streams_per_place);
-  if( iret != 0 )
-  {
-    printf("hstreams_app_init failed!\n");
-    exit(-1);
-  }
-
-  (hStreams_app_create_buf((double (*)[2000])L, (((n)-1)+ 1)* sizeof (double [2000])));
-  (hStreams_app_create_buf((double *)b, (((n)-1)+ 1)* sizeof (double )));
-  (hStreams_app_create_buf((double *)x, (((n)-1)+ 1)* sizeof (double )));
+  printf("%d\t%d\t%d\t", (((n)-1)-0 + 1), 1, tasks);
+  cl_mem L_mem_obj = clCreateBuffer(clGPUContext, CL_MEM_READ_WRITE, (((n)-1)+ 1)* sizeof (double [2000]), NULL, NULL);
+  cl_mem b_mem_obj = clCreateBuffer(clGPUContext, CL_MEM_READ_WRITE, (((n)-1)+ 1)* sizeof (double ), NULL, NULL);
+  cl_mem x_mem_obj = clCreateBuffer(clGPUContext, CL_MEM_READ_WRITE, (((n)-1)+ 1)* sizeof (double ), NULL, NULL);
   int i, j;
 
-(hStreams_app_xfer_memory((double *)x, (double *)x ,(((n)-1)+ 1)* sizeof (double ), 0, HSTR_SRC_TO_SINK, NULL));
-int sub_blocks = (((n)-1)-0 + 1)/ 4;
-int remain_index = (((n)-1)-0 + 1)% 4;
-int start_index = 0;
-int end_index = 0;
-uint64_t args[6];
-args[2] = (uint64_t) n;
-args[3] = (uint64_t) x;
-args[4] = (uint64_t) b;
-args[5] = (uint64_t) L;
-hStreams_ThreadSynchronize();
-start_index = 0;
-for (int idx_subtask = 0; idx_subtask < 4; idx_subtask++)
+errcode = clEnqueueWriteBuffer(clCommandQue[0], x_mem_obj, CL_TRUE, 0,
+(((n)-1)+ 1)* sizeof (double ), 
+x, 0, NULL, NULL);
+size_t localThreads[1] = {8};
+clSetKernelArg(clKernel, 0, sizeof(int), &n);
+clSetKernelArg(clKernel, 1, sizeof(cl_mem), (void *) &x_mem_obj);
+clSetKernelArg(clKernel, 2, sizeof(cl_mem), (void *) &b_mem_obj);
+clSetKernelArg(clKernel, 3, sizeof(cl_mem), (void *) &L_mem_obj);
+DeltaT();
+for (int i = 0; i < tasks; i++)
 {
-  args[0] = (uint64_t) start_index;
-  end_index = start_index + sub_blocks;
-  if (idx_subtask < remain_index)
-    end_index ++;
-  args[1] = (uint64_t) end_index;
-  (hStreams_app_xfer_memory(&L[start_index][0], &L[start_index][0], (end_index - start_index) * sizeof (double [2000]), idx_subtask % 2, HSTR_SRC_TO_SINK, NULL));
-  (hStreams_app_xfer_memory(&b[start_index], &b[start_index], (end_index - start_index) * sizeof (double ), idx_subtask % 2, HSTR_SRC_TO_SINK, NULL));
-  (hStreams_EnqueueCompute(
-			idx_subtask % 2,
-			"kernel",
-			3,
-			3,
-			args,
-			NULL,NULL,0));
-  start_index = end_index;
+  size_t globalOffset[1] = {i*(((n)-1)-0 + 1)/tasks+0};
+  size_t globalThreads[1] = {(((n)-1)-0 + 1)/tasks};
+  clEnqueueWriteBuffer(clCommandQue[i], L_mem_obj, CL_FALSE, i*(((n)-1)+ 1)* sizeof (double [2000])/tasks, (((n)-1)+ 1)* sizeof (double [2000])/tasks, &L[i*(((n)-1)-0 + 1)/tasks][0], 0, NULL, NULL);
+  clEnqueueWriteBuffer(clCommandQue[i], b_mem_obj, CL_FALSE, i*(((n)-1)+ 1)* sizeof (double )/tasks, (((n)-1)+ 1)* sizeof (double )/tasks, &b[i*(((n)-1)-0 + 1)/tasks], 0, NULL, NULL);
+  clEnqueueNDRangeKernel(clCommandQue[i], clKernel, 1, globalOffset, globalThreads, localThreads, 0, NULL, NULL);
 }
-hStreams_ThreadSynchronize();
-  (hStreams_app_xfer_memory((double *)x, (double *)x ,(((n)-1)+ 1)* sizeof (double ), 0, HSTR_SINK_TO_SRC, NULL));
+for (int i = 0; i < tasks; i++)
+  clFinish(clCommandQue[i]);
+printf("%f\n", DeltaT());
+errcode = clEnqueueReadBuffer(clCommandQue[0], x_mem_obj, CL_TRUE, 0,
+(((n)-1)+ 1)* sizeof (double ), 
+x, 0, NULL, NULL);
+clFinish(clCommandQue[0]);
 
-hStreams_app_fini();
 }
 
 

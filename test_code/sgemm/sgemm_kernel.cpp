@@ -25,8 +25,8 @@ void basicSgemm( char transa, char transb, int m, int n, int k, float alpha, con
     return;
   }
   #pragma omp parallel for collapse (2)
-  for (int mm = 0; mm < m; ++mm) {
-    for (int nn = 0; nn < n; ++nn) {
+  for (int nn = 0; nn < n; ++nn) {
+    for (int mm = 0; mm < m; ++mm) {
       float c = 0.0f;
       for (int i = 0; i < k; ++i) {
         float a = A[mm + i * lda]; 

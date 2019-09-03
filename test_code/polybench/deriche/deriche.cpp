@@ -88,6 +88,7 @@ void kernel_deriche(int w, int h, DATA_TYPE alpha,
    b2 = -EXP_FUN(SCALAR_VAL(-2.0)*alpha);
    c1 = c2 = 1;
 
+    #pragma omp parallel for private(i, j, yp1, yp2, xp1, xp2)
    for (i=0; i<_PB_W; i++) {
         ym1 = SCALAR_VAL(0.0);
         ym2 = SCALAR_VAL(0.0);
@@ -115,6 +116,7 @@ void kernel_deriche(int w, int h, DATA_TYPE alpha,
         }
     }
 
+    #pragma omp parallel for private(i, j, yp1, yp2, xp1, xp2)
     for (i=0; i<_PB_W; i++)
         for (j=0; j<_PB_H; j++) {
             imgOut[i][j] = c1 * (y1[i][j] + y2[i][j]);

@@ -1,6 +1,4 @@
-#include <hStreams_source.h>
-#include <hStreams_app_api.h>
-#include <intel-coi/common/COIMacros_common.h>
+#include "set_env.h"
 /**
  * This version is stamped on May 10, 2016
  *
@@ -79,6 +77,14 @@ void kernel_gemm(int ni, int nj, int nk,
 		 DATA_TYPE POLYBENCH_2D(A,NI,NK,ni,nk),
 		 DATA_TYPE POLYBENCH_2D(B,NK,NJ,nk,nj))
 {
+  read_cl_file();
+  cl_initialization();
+  cl_load_prog();
+
+  printf("%d\t%d\t%d\t", (((ni)-1)-0 + 1), 1, tasks);
+  cl_mem A_mem_obj = clCreateBuffer(clGPUContext, CL_MEM_READ_WRITE, (((ni)-1)+ 1)* sizeof (double [1200]), NULL, NULL);
+  cl_mem B_mem_obj = clCreateBuffer(clGPUContext, CL_MEM_READ_WRITE, (((nk)-1)+ 1)* sizeof (double [1100]), NULL, NULL);
+  cl_mem C_mem_obj = clCreateBuffer(clGPUContext, CL_MEM_READ_WRITE, (((ni)-1)+ 1)* sizeof (double [1100]), NULL, NULL);
   int i, j, k;
 
 //BLAS PARAMS
@@ -88,67 +94,31 @@ void kernel_gemm(int ni, int nj, int nk,
 //A is NIxNK
 //B is NKxNJ
 //C is NIxNJ
-uint32_t logical_streams_per_place= 1;
-uint32_t places_per_domain = 2;
-HSTR_OPTIONS hstreams_options;
-
-hStreams_GetCurrentOptions(&hstreams_options, sizeof(hstreams_options));
-hstreams_options.verbose = 0;
-hstreams_options.phys_domains_limit = 256;
-char *libNames[20] = {NULL,NULL};
-unsigned int libNameCnt = 0;
-libNames[libNameCnt++] = "kernel.so";
-hstreams_options.libNames = libNames;
-hstreams_options.libNameCnt = (uint16_t)libNameCnt;
-hStreams_SetOptions(&hstreams_options);
-
-int iret = hStreams_app_init(places_per_domain, logical_streams_per_place);
-if( iret != 0 )
+errcode = clEnqueueWriteBuffer(clCommandQue[0], B_mem_obj, CL_TRUE, 0,
+(((nk)-1)+ 1)* sizeof (double [1100]), 
+B, 0, NULL, NULL);
+size_t localThreads[1] = {8};
+clSetKernelArg(clKernel, 0, sizeof(int), &ni);
+clSetKernelArg(clKernel, 1, sizeof(int), &nj);
+clSetKernelArg(clKernel, 2, sizeof(double), &beta);
+clSetKernelArg(clKernel, 3, sizeof(int), &nk);
+clSetKernelArg(clKernel, 4, sizeof(double), &alpha);
+clSetKernelArg(clKernel, 5, sizeof(cl_mem), (void *) &C_mem_obj);
+clSetKernelArg(clKernel, 6, sizeof(cl_mem), (void *) &A_mem_obj);
+clSetKernelArg(clKernel, 7, sizeof(cl_mem), (void *) &B_mem_obj);
+DeltaT();
+for (int i = 0; i < tasks; i++)
 {
-  printf("hstreams_app_init failed!\n");
-  exit(-1);
+  size_t globalOffset[1] = {i*(((ni)-1)-0 + 1)/tasks+0};
+  size_t globalThreads[1] = {(((ni)-1)-0 + 1)/tasks};
+  clEnqueueWriteBuffer(clCommandQue[i], A_mem_obj, CL_FALSE, i*(((ni)-1)+ 1)* sizeof (double [1200])/tasks, (((ni)-1)+ 1)* sizeof (double [1200])/tasks, &A[i*(((ni)-1)-0 + 1)/tasks][0], 0, NULL, NULL);
+  clEnqueueWriteBuffer(clCommandQue[i], C_mem_obj, CL_FALSE, i*(((ni)-1)+ 1)* sizeof (double [1100])/tasks, (((ni)-1)+ 1)* sizeof (double [1100])/tasks, &C[i*(((ni)-1)-0 + 1)/tasks][0], 0, NULL, NULL);
+  clEnqueueNDRangeKernel(clCommandQue[i], clKernel, 1, globalOffset, globalThreads, localThreads, 0, NULL, NULL);
+  clEnqueueReadBuffer(clCommandQue[i], C_mem_obj, CL_FALSE, i*(((ni)-1)+ 1)* sizeof (double [1100])/tasks, (((ni)-1)+ 1)* sizeof (double [1100])/tasks, &C[i*(((ni)-1)-0 + 1)/tasks][0], 0, NULL, NULL);
 }
-
-(hStreams_app_create_buf((double (*)[1200])A, (((ni)-1)-(0) + 1)* sizeof (double [1200])));
-(hStreams_app_create_buf((double (*)[1100])B, (((nk)-1)-(0) + 1)* sizeof (double [1100])));
-(hStreams_app_create_buf((double (*)[1100])C, (((ni)-1)-(0) + 1)* sizeof (double [1100])));
-(hStreams_app_xfer_memory((double (*)[1200])B, (double (*)[1200])B ,(((nk)-1)-(0) + 1)* sizeof (double [1100]), 0, HSTR_SRC_TO_SINK, NULL));
-int sub_blocks = ni/ 4;
-int remain_index = ni% 4;
-int start_index = 0;
-int end_index = 0;
-uint64_t args[10];
-args[2] = (uint64_t) ni;
-args[3] = (uint64_t) nj;
-args[4] = (uint64_t) *((uint64_t *) (&beta));
-args[5] = (uint64_t) nk;
-args[6] = (uint64_t) *((uint64_t *) (&alpha));
-args[7] = (uint64_t) C;
-args[8] = (uint64_t) A;
-args[9] = (uint64_t) B;
-hStreams_ThreadSynchronize();
-start_index = 0;
-for (int i = 0; i < 4; i++)
-{
-  args[0] = (uint64_t) start_index;
-  end_index = start_index + sub_blocks;
-  if (i < remain_index)
-    end_index ++;
-  args[1] = (uint64_t) end_index;
-  (hStreams_app_xfer_memory(&A[start_index][0], &A[start_index][0], (end_index - start_index) * sizeof (double [1200]), i % 2, HSTR_SRC_TO_SINK, NULL));
-  (hStreams_app_xfer_memory(&C[start_index][0], &C[start_index][0], (end_index - start_index) * sizeof (double [1100]), i % 2, HSTR_SRC_TO_SINK, NULL));
-  (hStreams_EnqueueCompute(
-			i % 2,
-			"kernel",
-			7,
-			3,
-			args,
-			NULL,NULL,0));
-  (hStreams_app_xfer_memory(&C[start_index][0], &C[start_index][0], (end_index - start_index) * sizeof (double [1100]), i % 2, HSTR_SINK_TO_SRC, NULL));
-  start_index = end_index;
-}
-  hStreams_ThreadSynchronize();
-  hStreams_app_fini();
+for (int i = 0; i < tasks; i++)
+  clFinish(clCommandQue[i]);
+printf("%f\n", DeltaT());
 
 }
 

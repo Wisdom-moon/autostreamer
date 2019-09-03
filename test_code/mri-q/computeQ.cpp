@@ -29,7 +29,7 @@ void
 ComputePhiMagCPU(int numK, 
                  float* phiR, float* phiI, float* phiMag) {
   int indexK = 0;
-//  #pragma omp parallel for
+  #pragma omp parallel for
   for (indexK = 0; indexK < numK; indexK++) {
     float real = phiR[indexK];
     float imag = phiI[indexK];
@@ -48,9 +48,9 @@ ComputeQCPU(int numK, int numX,
   float sinArg;
 
   int indexK, indexX;
-  #pragma omp parallel for
-  for (indexK = 0; indexK < numK; indexK++) {
-    for (indexX = 0; indexX < numX; indexX++) {
+//  #pragma omp parallel for
+  for (indexX = 0; indexX < numX; indexX++) {
+    for (indexK = 0; indexK < numK; indexK++) {
       expArg = PIx2 * (kVals[indexK].Kx * x[indexX] +
                        kVals[indexK].Ky * y[indexX] +
                        kVals[indexK].Kz * z[indexX]);

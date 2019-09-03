@@ -467,7 +467,7 @@ if (!Infile){
 }
 std::string Line = std::string();
 ofstream File("kernel.cl");
-cerr << "\nWriting output to dev file " << DevFile<< "\n";
+cerr << "\nWriting output to dev file kernel.cl\n";
 
 unsigned LineNo = 1;
 while (!Infile.eof()) {
@@ -562,7 +562,7 @@ void CodeGen::generateOCLHostFile() {
   cerr << "\nWriting output to host file " << HostFile<< "\n";
 
   //Add hStreams include file;
-  File << "#include <set_env.h>\n";
+  File << "#include \"set_env.h\"\n";
 
   unsigned LineNo = 1;
   while (!Infile.eof()) {
@@ -582,7 +582,8 @@ void CodeGen::generateOCLHostFile() {
     //Add hStreams init code
     File <<Start<<"read_cl_file();\n"
          <<Start<<"cl_initialization();\n"
-	 <<Start<<"cl_load_prog();\n\n";
+	 <<Start<<"cl_load_prog();\n\n"
+	 <<Start<<"printf(\"\%d\\t\%d\\t\%d\\t\", " <<length_var_name<<", 1, tasks);\n";
   }
   if (create_mem_site == LineNo) {
     std::string Start;
@@ -635,6 +636,7 @@ void CodeGen::generateOCLHostFile() {
     }
 
     //Use idx_subtask is to avoid be the same to original variable name
+    File <<Start<<"DeltaT();\n";
     File <<Start<<"for (int i = 0; i < tasks; i++)\n"
 	 <<Start<<"{\n"
 	 <<Start<<"  size_t globalOffset[1] = {i*"<<length_var_name<<"/tasks+"<<start_index_str<<"};\n"
@@ -667,6 +669,9 @@ void CodeGen::generateOCLHostFile() {
 
     File <<Start<<"for (int i = 0; i < tasks; i++)\n"
     	 <<Start<<"  clFinish(clCommandQue[i]);\n";
+
+    File <<Start<<"printf(\"\%f\\n\", DeltaT());\n";
+
     for (auto &mem_xfer : post_xfers) {
       File <<Start<<"errcode = clEnqueueReadBuffer(clCommandQue[0], "
 	   <<mem_xfer.buf_name<<"_mem_obj, CL_TRUE, 0,\n"
@@ -976,7 +981,7 @@ void CodeGen::generateCUDAFile() {
       File <<Start<<"cudaMemcpyAsync("
 	   <<mem_xfer.buf_name<<", d_"
 	   <<mem_xfer.buf_name<<", "
-	   <<mem_xfer.size_string<<",cudaMemcpyDeviceToHost, streams[0];\n";
+	   <<mem_xfer.size_string<<",cudaMemcpyDeviceToHost, streams[0]);\n";
     }
     if (post_xfers.size() > 0)
       File <<Start<<"cudaEventRecord(stop_event, 0);\ncudaEventSynchronize(stop_event);\n";

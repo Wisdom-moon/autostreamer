@@ -1,6 +1,4 @@
-#include <hStreams_source.h>
-#include <hStreams_app_api.h>
-#include <intel-coi/common/COIMacros_common.h>
+#include "set_env.h"
 /**
  * This version is stamped on May 10, 2016
  *
@@ -69,63 +67,39 @@ void kernel_heat_3d(int tsteps,
 		      DATA_TYPE POLYBENCH_3D(A,N,N,N,n,n,n),
 		      DATA_TYPE POLYBENCH_3D(B,N,N,N,n,n,n))
 {
-  uint32_t logical_streams_per_place= 1;
-  uint32_t places_per_domain = 2;
-  HSTR_OPTIONS hstreams_options;
+  read_cl_file();
+  cl_initialization();
+  cl_load_prog();
 
-  hStreams_GetCurrentOptions(&hstreams_options, sizeof(hstreams_options));
-  hstreams_options.verbose = 0;
-  hstreams_options.phys_domains_limit = 256;
-  char *libNames[20] = {NULL,NULL};
-  unsigned int libNameCnt = 0;
-  libNames[libNameCnt++] = "kernel.so";
-  hstreams_options.libNames = libNames;
-  hstreams_options.libNameCnt = (uint16_t)libNameCnt;
-  hStreams_SetOptions(&hstreams_options);
-
-  int iret = hStreams_app_init(places_per_domain, logical_streams_per_place);
-  if( iret != 0 )
-  {
-    printf("hstreams_app_init failed!\n");
-    exit(-1);
-  }
-
-  (hStreams_app_create_buf((double (*)[120][120])A, (((_PB_N-1)-1)+ 1)* sizeof (double [120][120])));
-  (hStreams_app_create_buf((double (*)[120][120])B, (((_PB_N-1)-1)+ 1)* sizeof (double [120][120])));
+  printf("%d\t%d\t%d\t", (((n-1)-1)-1 + 1), 1, tasks);
+  cl_mem A_mem_obj = clCreateBuffer(clGPUContext, CL_MEM_READ_WRITE, (((n-1)-1)+1+ 1)* sizeof (double [120][120]), NULL, NULL);
+  cl_mem B_mem_obj = clCreateBuffer(clGPUContext, CL_MEM_READ_WRITE, (((n-1)-1)+ 1)* sizeof (double [120][120]), NULL, NULL);
   int t, i, j, k;
 
     for (t = 1; t <= TSTEPS; t++) {
-	(hStreams_app_xfer_memory((double (*)[120][120])A, (double (*)[120][120])A ,(((_PB_N-1)-1)+ 1)* sizeof (double [120][120]), 0, HSTR_SRC_TO_SINK, NULL));
-	int sub_blocks = (((_PB_N-1)-1)-1 + 1)/ 4;
-	int remain_index = (((_PB_N-1)-1)-1 + 1)% 4;
-	int start_index = 0;
-	int end_index = 0;
-	uint64_t args[5];
-	args[2] = (uint64_t) n;
-	args[3] = (uint64_t) B;
-	args[4] = (uint64_t) A;
-	hStreams_ThreadSynchronize();
-	start_index = 1;
-	for (int idx_subtask = 0; idx_subtask < 4; idx_subtask++)
+	errcode = clEnqueueWriteBuffer(clCommandQue[0], A_mem_obj, CL_TRUE, 0,
+	(((n-1)-1)+1+ 1)* sizeof (double [120][120]), 
+	A, 0, NULL, NULL);
+	size_t localThreads[1] = {8};
+	clSetKernelArg(clKernel, 0, sizeof(int), &n);
+	clSetKernelArg(clKernel, 1, sizeof(cl_mem), (void *) &B_mem_obj);
+	clSetKernelArg(clKernel, 2, sizeof(cl_mem), (void *) &A_mem_obj);
+	DeltaT();
+	for (int i = 0; i < tasks; i++)
 	{
-	  args[0] = (uint64_t) start_index;
-	  end_index = start_index + sub_blocks;
-	  if (idx_subtask < remain_index)
-	    end_index ++;
-	  args[1] = (uint64_t) end_index;
-	  (hStreams_EnqueueCompute(
-				idx_subtask % 2,
-				"kernel",
-				3,
-				2,
-				args,
-				NULL,NULL,0));
-	  (hStreams_app_xfer_memory(&B[start_index][0][0], &B[start_index][0][0], (end_index - start_index) * sizeof (double [120][120]), idx_subtask % 2, HSTR_SINK_TO_SRC, NULL));
-	  start_index = end_index;
+	  size_t globalOffset[1] = {i*(((n-1)-1)-1 + 1)/tasks+1};
+	  size_t globalThreads[1] = {(((n-1)-1)-1 + 1)/tasks};
+	  clEnqueueNDRangeKernel(clCommandQue[i], clKernel, 1, globalOffset, globalThreads, localThreads, 0, NULL, NULL);
+	  clEnqueueReadBuffer(clCommandQue[i], B_mem_obj, CL_FALSE, i*(((n-1)-1)+ 1)* sizeof (double [120][120])/tasks, (((n-1)-1)+ 1)* sizeof (double [120][120])/tasks, &B[i*(((n-1)-1)-1 + 1)/tasks][0][0], 0, NULL, NULL);
 	}
-	hStreams_ThreadSynchronize();
+	for (int i = 0; i < tasks; i++)
+	  clFinish(clCommandQue[i]);
+	printf("%f\n", DeltaT());
         for (i = 1; i < _PB_N-1; i++) {
            for (j = 1; j < _PB_N-1; j++) {
+               clReleaseMemObject(A_mem_obj);
+               clReleaseMemObject(B_mem_obj);
+               cl_clean_up();
                for (k = 1; k < _PB_N-1; k++) {
                    A[i][j][k] =   SCALAR_VAL(0.125) * (B[i+1][j][k] - SCALAR_VAL(2.0) * B[i][j][k] + B[i-1][j][k])
                                 + SCALAR_VAL(0.125) * (B[i][j+1][k] - SCALAR_VAL(2.0) * B[i][j][k] + B[i][j-1][k])
@@ -136,7 +110,6 @@ void kernel_heat_3d(int tsteps,
        }
     }
 
-hStreams_app_fini();
 }
 
 

@@ -1,5 +1,5 @@
 //------------------------------------------------------------------------------
-// OpenMP to hStreams:
+// C to hStreams:
 //
 // Peng Zhang(pengzhang_nudt@sina.com)
 // This code is in the public domain

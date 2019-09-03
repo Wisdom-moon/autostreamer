@@ -1,6 +1,4 @@
-#include <hStreams_source.h>
-#include <hStreams_app_api.h>
-#include <intel-coi/common/COIMacros_common.h>
+#include "set_env.h"
 /**
  * This version is stamped on May 10, 2016
  *
@@ -72,29 +70,13 @@ void kernel_deriche(int w, int h, DATA_TYPE alpha,
        DATA_TYPE POLYBENCH_2D(imgOut, W, H, w, h),
        DATA_TYPE POLYBENCH_2D(y1, W, H, w, h),
        DATA_TYPE POLYBENCH_2D(y2, W, H, w, h)) {
-    uint32_t logical_streams_per_place= 1;
-    uint32_t places_per_domain = 2;
-    HSTR_OPTIONS hstreams_options;
+    read_cl_file();
+    cl_initialization();
+    cl_load_prog();
 
-    hStreams_GetCurrentOptions(&hstreams_options, sizeof(hstreams_options));
-    hstreams_options.verbose = 0;
-    hstreams_options.phys_domains_limit = 256;
-    char *libNames[20] = {NULL,NULL};
-    unsigned int libNameCnt = 0;
-    libNames[libNameCnt++] = "kernel.so";
-    hstreams_options.libNames = libNames;
-    hstreams_options.libNameCnt = (uint16_t)libNameCnt;
-    hStreams_SetOptions(&hstreams_options);
-
-    int iret = hStreams_app_init(places_per_domain, logical_streams_per_place);
-    if( iret != 0 )
-    {
-      printf("hstreams_app_init failed!\n");
-      exit(-1);
-    }
-
-    (hStreams_app_create_buf((float (*)[2160])imgIn, (((w)-1)+ 1)* sizeof (float [2160])));
-    (hStreams_app_create_buf((float (*)[2160])y2, (((w)-1)+ 1)* sizeof (float [2160])));
+    printf("%d\t%d\t%d\t", (((w)-1)-0 + 1), 1, tasks);
+    cl_mem imgIn_mem_obj = clCreateBuffer(clGPUContext, CL_MEM_READ_WRITE, (((w)-1)+ 1)* sizeof (float [2160]), NULL, NULL);
+    cl_mem y2_mem_obj = clCreateBuffer(clGPUContext, CL_MEM_READ_WRITE, (((w)-1)+ 1)* sizeof (float [2160]), NULL, NULL);
     int i,j;
     DATA_TYPE xm1, tm1, ym1, ym2;
     DATA_TYPE xp1, xp2;
@@ -126,41 +108,28 @@ void kernel_deriche(int w, int h, DATA_TYPE alpha,
         }
     }
 
-    int sub_blocks = (((w)-1)-0 + 1)/ 4;
-    int remain_index = (((w)-1)-0 + 1)% 4;
-    int start_index = 0;
-    int end_index = 0;
-    uint64_t args[10];
-    args[2] = (uint64_t) w;
-    args[3] = (uint64_t) h;
-    args[4] = (uint64_t) *((uint64_t *) (&a3));
-    args[5] = (uint64_t) *((uint64_t *) (&a4));
-    args[6] = (uint64_t) *((uint64_t *) (&b1));
-    args[7] = (uint64_t) *((uint64_t *) (&b2));
-    args[8] = (uint64_t) y2;
-    args[9] = (uint64_t) imgIn;
-    hStreams_ThreadSynchronize();
-    start_index = 0;
-    for (int idx_subtask = 0; idx_subtask < 4; idx_subtask++)
+    size_t localThreads[1] = {8};
+    clSetKernelArg(clKernel, 0, sizeof(int), &w);
+    clSetKernelArg(clKernel, 1, sizeof(int), &h);
+    clSetKernelArg(clKernel, 2, sizeof(float), &a3);
+    clSetKernelArg(clKernel, 3, sizeof(float), &a4);
+    clSetKernelArg(clKernel, 4, sizeof(float), &b1);
+    clSetKernelArg(clKernel, 5, sizeof(float), &b2);
+    clSetKernelArg(clKernel, 6, sizeof(cl_mem), (void *) &y2_mem_obj);
+    clSetKernelArg(clKernel, 7, sizeof(cl_mem), (void *) &imgIn_mem_obj);
+    DeltaT();
+    for (int i = 0; i < tasks; i++)
     {
-      args[0] = (uint64_t) start_index;
-      end_index = start_index + sub_blocks;
-      if (idx_subtask < remain_index)
-        end_index ++;
-      args[1] = (uint64_t) end_index;
-      (hStreams_app_xfer_memory(&imgIn[start_index][0], &imgIn[start_index][0], (end_index - start_index) * sizeof (float [2160]), idx_subtask % 2, HSTR_SRC_TO_SINK, NULL));
-      (hStreams_app_xfer_memory(&y2[start_index][0], &y2[start_index][0], (end_index - start_index) * sizeof (float [2160]), idx_subtask % 2, HSTR_SRC_TO_SINK, NULL));
-      (hStreams_EnqueueCompute(
-    			idx_subtask % 2,
-    			"kernel",
-    			8,
-    			2,
-    			args,
-    			NULL,NULL,0));
-      (hStreams_app_xfer_memory(&y2[start_index][0], &y2[start_index][0], (end_index - start_index) * sizeof (float [2160]), idx_subtask % 2, HSTR_SINK_TO_SRC, NULL));
-      start_index = end_index;
+      size_t globalOffset[1] = {i*(((w)-1)-0 + 1)/tasks+0};
+      size_t globalThreads[1] = {(((w)-1)-0 + 1)/tasks};
+      clEnqueueWriteBuffer(clCommandQue[i], imgIn_mem_obj, CL_FALSE, i*(((w)-1)+ 1)* sizeof (float [2160])/tasks, (((w)-1)+ 1)* sizeof (float [2160])/tasks, &imgIn[i*(((w)-1)-0 + 1)/tasks][0], 0, NULL, NULL);
+      clEnqueueWriteBuffer(clCommandQue[i], y2_mem_obj, CL_FALSE, i*(((w)-1)+ 1)* sizeof (float [2160])/tasks, (((w)-1)+ 1)* sizeof (float [2160])/tasks, &y2[i*(((w)-1)-0 + 1)/tasks][0], 0, NULL, NULL);
+      clEnqueueNDRangeKernel(clCommandQue[i], clKernel, 1, globalOffset, globalThreads, localThreads, 0, NULL, NULL);
+      clEnqueueReadBuffer(clCommandQue[i], y2_mem_obj, CL_FALSE, i*(((w)-1)+ 1)* sizeof (float [2160])/tasks, (((w)-1)+ 1)* sizeof (float [2160])/tasks, &y2[i*(((w)-1)-0 + 1)/tasks][0], 0, NULL, NULL);
     }
-    hStreams_ThreadSynchronize();
+    for (int i = 0; i < tasks; i++)
+      clFinish(clCommandQue[i]);
+    printf("%f\n", DeltaT());
 
     for (i=0; i<_PB_W; i++)
         for (j=0; j<_PB_H; j++) {
@@ -195,10 +164,12 @@ void kernel_deriche(int w, int h, DATA_TYPE alpha,
     }
 
     for (i=0; i<_PB_W; i++)
+        clReleaseMemObject(imgIn_mem_obj);
+        clReleaseMemObject(y2_mem_obj);
+        cl_clean_up();
         for (j=0; j<_PB_H; j++)
             imgOut[i][j] = c2*(y1[i][j] + y2[i][j]);
 
-hStreams_app_fini();
 }
 
 

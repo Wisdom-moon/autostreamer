@@ -13,40 +13,8 @@
 #include "file.h"
 #include "convert_dataset.h"
 
-static int generate_vector(float *x_vector, int dim) 
-{	
-	srand(54321);	
-  int i;
-	for(i=0;i<dim;i++)
-	{
-		x_vector[i] = (rand() / (float) RAND_MAX);
-	}
-	return 0;
-}
 
-/*
-void jdsmv(int height, int len, float* value, int* perm, int* jds_ptr, int* col_index, float* vector,
-        float* result){
-        int i;
-        int col,row;
-        int row_index =0;
-        int prem_indicator=0;
-        for (i=0; i<len; i++){
-                if (i>=jds_ptr[prem_indicator+1]){
-                        prem_indicator++;
-                        row_index=0;
-                }
-                if (row_index<height){
-                col = col_index[i];
-                row = perm[row_index];
-                result[row]+=value[i]*vector[col];
-                }
 
-                row_index++;
-        }
-        return;
-}
-*/
 int main(int argc, char** argv) {
 	struct pb_TimerSet timers;
 	struct pb_Parameters *parameters;
@@ -64,7 +32,6 @@ int main(int argc, char** argv) {
       fprintf(stderr, "Expecting two input filenames\n");
       exit(-1);
     }
-
 	
 	pb_InitializeTimerSet(&timers);
 	pb_SwitchToTimer(&timers, pb_TimerID_COMPUTE);
@@ -93,9 +60,6 @@ int main(int argc, char** argv) {
 	//inputData(parameters->inpFiles[0], &len, &depth, &dim,&nzcnt_len,&pad,
 	//    &h_data, &h_indices, &h_ptr,
 	//    &h_perm, &h_nzcnt);
-
- 
-
 	int col_count;
 	coo_to_jds(
 		parameters->inpFiles[0], // bcsstk32.mtx, fidapm05.mtx, jgl009.mtx
@@ -109,22 +73,21 @@ int main(int argc, char** argv) {
 		&col_count, &dim, &len, &nzcnt_len, &depth
 	);		
 
+
   h_Ax_vector=(float*)malloc(sizeof(float)*dim);
   h_x_vector=(float*)malloc(sizeof(float)*dim);
-//  generate_vector(h_x_vector, dim);
-  input_vec( parameters->inpFiles[1],h_x_vector,dim);
+  input_vec( parameters->inpFiles[1], h_x_vector,dim);
+	
+
 
 	
-	pb_SwitchToTimer(&timers, pb_TimerID_COMPUTE);
-
-	
-  int p, i;
+  int p, i, k;
 	//main execution
+	pb_SwitchToTimer(&timers, pb_TimerID_KERNEL);
 	for(p=0;p<50;p++)
 	{
-    #pragma omp parallel for
+		#pragma scop
 		for (i = 0; i < dim; i++) {
-      int k;
 		  float sum = 0.0f;
 		  //int  bound = h_nzcnt[i / 32];
 		  int  bound = h_nzcnt[i];
@@ -137,9 +100,9 @@ int main(int argc, char** argv) {
 
 			sum += d*t;
 		  }
-    //  #pragma omp critical 
 		  h_Ax_vector[h_perm[i]] = sum;
 		}
+		#pragma endscop
 	}	
 
 	if (parameters->outFile) {

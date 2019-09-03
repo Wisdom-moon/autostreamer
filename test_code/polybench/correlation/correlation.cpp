@@ -75,6 +75,7 @@ void kernel_correlation(int m, int n,
   DATA_TYPE eps = SCALAR_VAL(0.1);
 
 
+#pragma omp parallel for private(i, j)
   for (j = 0; j < _PB_M; j++)
     {
       mean[j] = SCALAR_VAL(0.0);
@@ -82,7 +83,6 @@ void kernel_correlation(int m, int n,
 	mean[j] += data[i][j];
       mean[j] /= float_n;
     }
-
 
 #pragma omp parallel for private(i, j)
    for (j = 0; j < _PB_M; j++)
